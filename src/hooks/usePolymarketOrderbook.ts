@@ -21,7 +21,7 @@ const QUERY_KEYS = {
 
 // Configuration
 const ORDERBOOK_STALE_TIME = 10 * 1000; // 10 seconds - orderbooks change frequently
-const ORDERBOOK_REFETCH_INTERVAL = 15 * 1000; // 15 seconds
+// const ORDERBOOK_REFETCH_INTERVAL = 15 * 1000; // 15 seconds - unused, refetch controlled by hook options
 
 /**
  * Aggregated orderbook level for display

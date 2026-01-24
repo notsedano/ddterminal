@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "description": "Frontend webapp for elizaOS Agent Daredevil",
+  "engines": {
+    "node": "18.x"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
