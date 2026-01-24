@@ -6,6 +6,7 @@ import { format } from 'date-fns';
 import { cn } from '@/utils/cn';
 import { useState } from 'react';
 import type { Session } from '@/types';
+import daredevilImage from '@assets/daredevil png.png';
 
 export interface SidebarProps {
   currentSessionId: string | null;
@@ -108,6 +109,13 @@ export function Sidebar({ currentSessionId, onSessionSelect, agentId }: SidebarP
             ))}
           </div>
         )}
+      </div>
+      <div className="p-4 border-t border-border flex items-center justify-center">
+        <img
+          src={daredevilImage}
+          alt="Daredevil"
+          className="w-full h-auto object-contain max-h-32"
+        />
       </div>
     </aside>
   );
