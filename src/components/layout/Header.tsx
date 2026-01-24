@@ -36,14 +36,22 @@ export function Header({
   };
 
   return (
-    <header className="border-b border-border bg-background h-[65px] flex shrink-0">
+    <header className="hud-border border-b bg-background h-[65px] flex shrink-0 relative z-20">
       <div className="container mx-auto px-4 h-full flex items-center justify-between">
-        <div className="flex items-center shrink-0 min-w-0">
+        <div className="flex items-center shrink-0 min-w-0 gap-4">
           <img
             src={logo}
             alt="Agent Daredevil — A.I. · Sports · Gaming · NPC"
             className="h-10 sm:h-11 md:h-12 w-auto max-h-full object-contain object-left"
           />
+          <div className="flex flex-col justify-center">
+            <div className="text-white text-base sm:text-lg font-normal">
+              //DARE TERMINAL
+            </div>
+            <div className="text-white text-xs sm:text-sm border border-yellow-400 px-2 py-0.5 mt-1 inline-block">
+              early access testnet v.0.1
+            </div>
+          </div>
         </div>
         <div className="flex items-center space-x-2">
           {onToggleMatchPanel && (

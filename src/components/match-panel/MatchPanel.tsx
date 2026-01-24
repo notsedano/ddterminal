@@ -66,7 +66,7 @@ export function MatchPanel({ className, defaultExpanded = true }: MatchPanelProp
       <div
         className={cn(
           'hidden md:flex flex-col',
-          'w-80 bg-background border-l border-border',
+          'w-80 hud-panel border-l bg-background',
           'transition-all duration-300',
           !isExpanded && 'w-12',
           className

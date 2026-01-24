@@ -42,8 +42,8 @@ export function Sidebar({ currentSessionId, onSessionSelect, agentId }: SidebarP
   };
 
   return (
-    <aside className="w-64 border-r border-border bg-background flex flex-col">
-      <div className="p-4 border-b border-border space-y-2">
+    <aside className="w-64 hud-panel border-r bg-background flex flex-col relative z-10">
+      <div className="p-4 border-b border-border space-y-2 relative z-10">
         <Button onClick={handleNewSession} className="w-full" size="sm">
           <Plus className="h-4 w-4 mr-2" />
           New Session
@@ -88,10 +88,10 @@ export function Sidebar({ currentSessionId, onSessionSelect, agentId }: SidebarP
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate">
+                    <div className="text-sm font-medium truncate hud-text">
                       {format(new Date(session.createdAt), 'MMM d, HH:mm')}
                     </div>
-                    <div className="text-xs text-muted-foreground truncate">
+                    <div className="text-xs text-muted-foreground truncate hud-text-dim hud-data">
                       {session.channelId.slice(0, 8)}...
                     </div>
                   </div>

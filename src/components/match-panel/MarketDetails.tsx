@@ -24,6 +24,7 @@ import {
   OutcomeDistributionChart,
   MarketMetricsCard,
 } from '@/components/charts';
+import { HudChartWrapper } from '@/components/ui/HudChartWrapper';
 import { 
   TrendingUp, 
   DollarSign, 
@@ -211,24 +212,30 @@ export function MarketDetails({
                 )}
 
                 {activeTab === 'chart' && outcomes[0] && (
-                  <PriceLineChart
-                    market={market}
-                    tokenId={outcomes[0].tokenId}
-                    outcomeName={outcomes[0].name}
-                    height={180}
-                    showControls={true}
-                  />
+                  <HudChartWrapper showScanlines={true} variant="default">
+                    <PriceLineChart
+                      market={market}
+                      tokenId={outcomes[0].tokenId}
+                      outcomeName={outcomes[0].name}
+                      height={180}
+                      showControls={true}
+                    />
+                  </HudChartWrapper>
                 )}
 
                 {activeTab === 'distribution' && (
-                  <OutcomeDistributionChart
-                    market={market}
-                    size={160}
-                  />
+                  <HudChartWrapper showScanlines={true} variant="default">
+                    <OutcomeDistributionChart
+                      market={market}
+                      size={160}
+                    />
+                  </HudChartWrapper>
                 )}
 
                 {activeTab === 'metrics' && (
-                  <MarketMetricsCard market={market} />
+                  <HudChartWrapper variant="minimal">
+                    <MarketMetricsCard market={market} />
+                  </HudChartWrapper>
                 )}
               </div>
             </div>
@@ -316,7 +323,7 @@ function OutcomeCard({ outcome, index, oddsFormat, metrics, marketType, line }: 
       </span>
 
       {/* Price */}
-      <span className={cn('text-2xl font-bold', colorClass)}>
+      <span className={cn('text-2xl font-bold hud-data', colorClass)}>
         {formatOdds(outcome.price)}
       </span>
 
@@ -325,12 +332,12 @@ function OutcomeCard({ outcome, index, oddsFormat, metrics, marketType, line }: 
         <div className="flex items-center gap-2 mt-2 text-[10px]">
           {metrics.bestBid !== null && (
             <span className="text-muted-foreground">
-              Bid: <span className="text-green-400">${metrics.bestBid.toFixed(2)}</span>
+              Bid: <span className="text-green-400 hud-data">${metrics.bestBid.toFixed(2)}</span>
             </span>
           )}
           {metrics.bestAsk !== null && (
             <span className="text-muted-foreground">
-              Ask: <span className="text-red-400">${metrics.bestAsk.toFixed(2)}</span>
+              Ask: <span className="text-red-400 hud-data">${metrics.bestAsk.toFixed(2)}</span>
             </span>
           )}
         </div>
@@ -398,7 +405,7 @@ function MetricCard({ icon: Icon, label, value, subValue, highlight }: MetricCar
         'h-3.5 w-3.5 mb-1',
         highlight ? 'text-green-400' : 'text-muted-foreground'
       )} />
-      <span className="text-xs font-medium">{value}</span>
+      <span className="text-xs font-medium hud-data">{value}</span>
       <span className="text-[10px] text-muted-foreground">{label}</span>
       {subValue && (
         <span className="text-[9px] text-muted-foreground/70">{subValue}</span>
@@ -422,7 +429,7 @@ function OverroundIndicator({ overround }: { overround: number }) {
       'bg-red-500/10 text-red-400'
     )}>
       <span>Market Edge:</span>
-      <span className="font-medium">{overround.toFixed(1)}%</span>
+      <span className="font-medium hud-data">{overround.toFixed(1)}%</span>
       <span className="text-muted-foreground">
         {isGood ? '(Low vig)' : isFair ? '(Standard)' : '(High vig)'}
       </span>
@@ -452,7 +459,7 @@ export function CompactMarketDetails({ market, className }: CompactMarketDetails
               {outcome.name}:
             </span>
             <span className={cn(
-              'text-sm font-semibold',
+              'text-sm font-semibold hud-data',
               index === 0 ? 'text-green-400' : 'text-red-400'
             )}>
               {formatPriceAsPercentage(outcome.price)}
@@ -463,13 +470,13 @@ export function CompactMarketDetails({ market, className }: CompactMarketDetails
 
       {/* Quick metrics */}
       <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-        <span>Vol: {formatVolume(market.market.volume)}</span>
+        <span className="hud-data">Vol: {formatVolume(market.market.volume)}</span>
         <span>•</span>
-        <span>Liq: {formatLiquidity(market.market.liquidity)}</span>
+        <span className="hud-data">Liq: {formatLiquidity(market.market.liquidity)}</span>
         {market.market.spread !== undefined && (
           <>
             <span>•</span>
-            <span>Spread: {Math.round(market.market.spread * 100)}¢</span>
+            <span className="hud-data">Spread: {Math.round(market.market.spread * 100)}¢</span>
           </>
         )}
       </div>
@@ -588,13 +595,13 @@ function OrderbookTabContent({ outcomes, outcomeMetrics, isLoading }: OrderbookT
                   <div className="mt-2 grid grid-cols-2 gap-2 text-[10px]">
                     <div>
                       <span className="text-muted-foreground">Bid: </span>
-                      <span className="text-green-400 font-mono">
+                      <span className="text-green-400 font-mono hud-data">
                         {m.bestBid !== null ? `$${m.bestBid.toFixed(2)}` : '-'}
                       </span>
                     </div>
                     <div>
                       <span className="text-muted-foreground">Ask: </span>
-                      <span className="text-red-400 font-mono">
+                      <span className="text-red-400 font-mono hud-data">
                         {m.bestAsk !== null ? `$${m.bestAsk.toFixed(2)}` : '-'}
                       </span>
                     </div>
@@ -609,14 +616,16 @@ function OrderbookTabContent({ outcomes, outcomeMetrics, isLoading }: OrderbookT
   }
 
   return (
-    <OrderbookDepthChart
-      bids={aggregatedLevels.bids}
-      asks={aggregatedLevels.asks}
-      metrics={metrics}
-      height={220}
-      showMetrics={true}
-      showImbalance={true}
-    />
+    <HudChartWrapper showScanlines={true} variant="default">
+      <OrderbookDepthChart
+        bids={aggregatedLevels.bids}
+        asks={aggregatedLevels.asks}
+        metrics={metrics}
+        height={220}
+        showMetrics={true}
+        showImbalance={true}
+      />
+    </HudChartWrapper>
   );
 }
 

@@ -25,21 +25,40 @@ interface PriceCache {
 let priceCache: PriceCache | null = null;
 const PRICE_CACHE_TTL = 5000; // 5 seconds - very short for pricing data
 
+// Track if we've already logged the price endpoint warning to avoid console spam
+let hasPriceEndpointWarned = false;
+
 /**
  * Get current price for a single token
+ * Note: This endpoint may not exist on Polymarket's API. Use getTokenPrices for batch requests instead.
+ * @deprecated Use getTokenPrices for batch requests - individual endpoint may not exist
  */
 export async function getTokenPrice(tokenId: string, side: 'buy' | 'sell' = 'buy'): Promise<number> {
-  const response = await fetch(
-    `${CLOB_API}/price?token_id=${encodeURIComponent(tokenId)}&side=${side}`,
-    { headers: { 'Accept': 'application/json' } }
-  );
+  try {
+    const response = await fetch(
+      `${CLOB_API}/price?token_id=${encodeURIComponent(tokenId)}&side=${side}`,
+      { headers: { 'Accept': 'application/json' } }
+    );
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch price: ${response.status} ${response.statusText}`);
+    if (!response.ok) {
+      // If 404, the endpoint doesn't exist - return 0 silently (log only once)
+      if (response.status === 404) {
+        if (!hasPriceEndpointWarned) {
+          hasPriceEndpointWarned = true;
+          console.warn('Polymarket /price endpoint not found (404). Individual price fetching disabled.');
+        }
+        return 0;
+      }
+      // For other errors, just return 0 silently to avoid console spam
+      return 0;
+    }
+
+    const data = await response.json();
+    return parseFloat(data.price) || 0;
+  } catch {
+    // Silently return 0 for any errors to prevent console spam
+    return 0;
   }
-
-  const data = await response.json();
-  return parseFloat(data.price) || 0;
 }
 
 /**
@@ -88,14 +107,22 @@ export async function getTokenPrices(tokenIds: string[]): Promise<Map<string, nu
   );
 
   if (!response.ok) {
-    // Fallback to individual requests if batch fails
+    // For ANY error (404, 500, etc.), return cached prices or empty map
+    // Do NOT fallback to individual /price calls as that endpoint also doesn't exist
     const prices = new Map<string, number>();
-    await Promise.all(
-      tokenIds.map(async (tokenId) => {
-        const price = await getTokenPrice(tokenId).catch(() => 0);
-        prices.set(tokenId, price);
-      })
-    );
+    if (priceCache) {
+      for (const tokenId of tokenIds) {
+        const cachedPrice = priceCache.prices.get(tokenId);
+        if (cachedPrice !== undefined) {
+          prices.set(tokenId, cachedPrice);
+        }
+      }
+    }
+    // Only log once to avoid console spam
+    if (!hasPriceEndpointWarned) {
+      hasPriceEndpointWarned = true;
+      console.warn(`Polymarket price API returned ${response.status}. Using cached prices.`);
+    }
     return prices;
   }
 
@@ -153,17 +180,9 @@ export async function getOrderbooks(tokenIds: string[]): Promise<Map<string, Pol
   );
 
   if (!response.ok) {
-    // Fallback to individual requests
-    const orderbooks = new Map<string, PolymarketOrderbook>();
-    await Promise.all(
-      tokenIds.map(async (tokenId) => {
-        const book = await getOrderbook(tokenId).catch(() => null);
-        if (book) {
-          orderbooks.set(tokenId, book);
-        }
-      })
-    );
-    return orderbooks;
+    // Don't fallback to individual requests - they will likely also fail
+    // Return empty map to avoid cascading 404s and console spam
+    return new Map();
   }
 
   const data = await response.json();
@@ -425,21 +444,32 @@ export async function refreshMarketPrices(
     return markets;
   }
 
-  // Fetch all prices in batch
-  const prices = await getTokenPrices(tokenIds);
+  try {
+    // Fetch all prices in batch
+    const prices = await getTokenPrices(tokenIds);
 
-  // Update markets with new prices
-  return markets.map(market => ({
-    ...market,
-    market: {
-      ...market.market,
-      outcomes: market.market.outcomes.map(outcome => ({
-        ...outcome,
-        price: prices.get(outcome.tokenId) ?? outcome.price,
-      })),
-    },
-    lastUpdated: new Date(),
-  }));
+    // Only update if we got some prices (avoid unnecessary re-renders)
+    if (prices.size === 0) {
+      // No prices fetched, return original markets to avoid triggering updates
+      return markets;
+    }
+
+    // Update markets with new prices
+    return markets.map(market => ({
+      ...market,
+      market: {
+        ...market.market,
+        outcomes: market.market.outcomes.map(outcome => ({
+          ...outcome,
+          price: prices.get(outcome.tokenId) ?? outcome.price,
+        })),
+      },
+      lastUpdated: new Date(),
+    }));
+  } catch {
+    // Silently fail and return original markets to prevent error cascades
+    return markets;
+  }
 }
 
 /**

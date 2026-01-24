@@ -50,13 +50,20 @@ describe('ElizaSocketClient', () => {
       socketClient.connect('agent-123', 'room-456', handlers);
 
       expect(mockedIo).toHaveBeenCalledWith('https://test-api.example.com', {
-        path: '/ws',
+        path: '/socket.io',
         transports: ['websocket'],
         reconnection: true,
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
         timeout: 20000,
+        query: {
+          entityId: 'agent-123',
+          roomId: 'room-456',
+        },
+        auth: {
+          entityId: 'agent-123',
+        },
       });
     });
 

@@ -1,7 +1,46 @@
 # Backend WebSocket 502 Error - Troubleshooting Guide
 
-## Problem
-Frontend is receiving `502 Bad Gateway` errors when attempting to connect to the WebSocket endpoint:
+## Status
+**Last tested:** January 25, 2026  
+**Result:** ✅ **CONNECTED SUCCESSFULLY**  
+**Frontend Status:** Working - WebSocket real-time connection established
+
+## Working Frontend Implementation
+The frontend WebSocket implementation is now working correctly:
+- Socket.IO client connects to: `wss://3a6615a6-aeris-agent.containers.elizacloud.ai/socket.io/`
+- Using path `/socket.io` (Socket.IO default path - works with elizaCloud reverse proxy)
+- Using WebSocket transport only (no polling)
+- **Key:** Must pass `entityId` (agentId) in both `query` and `auth` options
+- Debug logging available by setting `DEBUG = true` in:
+  - `src/services/websocket/socketClient.ts`
+  - `src/hooks/useSocket.ts`
+
+### Working Connection Configuration
+```javascript
+this.socket = io(this.url, {
+  path: '/socket.io',
+  transports: ['websocket'],
+  reconnection: true,
+  reconnectionAttempts: 5,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 5000,
+  timeout: 20000,
+  query: {
+    entityId: agentId,
+    roomId: roomId,
+  },
+  auth: {
+    entityId: agentId,
+  },
+});
+```
+
+## Problem (Resolved)
+Previously, frontend was receiving `502 Bad Gateway` errors when using custom `/ws` path.
+
+**Solution:** Switched to Socket.IO's default `/socket.io` path which works with elizaCloud's reverse proxy without additional configuration.
+
+Previous error (now resolved):
 ```
 WebSocket connection to 'wss://3a6615a6-aeris-agent.containers.elizacloud.ai/ws/?EIO=4&transport=websocket' failed: 
 Error during WebSocket handshake: Unexpected response code: 502
@@ -29,7 +68,7 @@ Error during WebSocket handshake: Unexpected response code: 502
 **Connection Attempt:**
 ```javascript
 const socket = io('https://3a6615a6-aeris-agent.containers.elizacloud.ai', {
-  path: '/ws',
+  path: '/socket.io',
   transports: ['websocket'],
   reconnection: true,
 });
@@ -97,7 +136,7 @@ Try connecting with a simple test script:
 ```javascript
 const io = require('socket.io-client');
 const socket = io('https://3a6615a6-aeris-agent.containers.elizacloud.ai', {
-  path: '/ws',
+  path: '/socket.io',
   transports: ['websocket']
 });
 

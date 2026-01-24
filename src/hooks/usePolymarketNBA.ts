@@ -104,13 +104,30 @@ export function usePolymarketNBA(options: UsePolymarketNBAOptions = {}): UsePoly
   const refreshPrices = useCallback(async () => {
     if (markets.length === 0) return;
 
-    const updatedMarkets = await refreshMarketPrices(markets);
-    
-    queryClient.setQueryData<PolymarketSportsMarket[]>(
-      QUERY_KEYS.nbaMarkets,
-      updatedMarkets
-    );
-    lastUpdatedRef.current = new Date();
+    try {
+      const updatedMarkets = await refreshMarketPrices(markets);
+      
+      // Only update if markets actually changed to prevent unnecessary re-renders
+      const hasChanges = updatedMarkets.some((market, index) => {
+        const original = markets[index];
+        if (!original) return true;
+        // Check if any outcome prices changed
+        return market.market.outcomes.some((outcome, oIndex) => {
+          const originalOutcome = original.market.outcomes[oIndex];
+          return originalOutcome && outcome.price !== originalOutcome.price;
+        });
+      });
+
+      if (hasChanges) {
+        queryClient.setQueryData<PolymarketSportsMarket[]>(
+          QUERY_KEYS.nbaMarkets,
+          updatedMarkets
+        );
+        lastUpdatedRef.current = new Date();
+      }
+    } catch {
+      // Silently handle errors to prevent jittering - no logging
+    }
   }, [markets, queryClient]);
 
   // Set up price refresh polling
@@ -182,12 +199,29 @@ export function useAllPolymarketNBAMarkets(options: UsePolymarketNBAOptions = {}
   const refreshPrices = useCallback(async () => {
     if (markets.length === 0) return;
 
-    const updatedMarkets = await refreshMarketPrices(markets);
-    
-    queryClient.setQueryData<PolymarketSportsMarket[]>(
-      QUERY_KEYS.allNbaMarkets,
-      updatedMarkets
-    );
+    try {
+      const updatedMarkets = await refreshMarketPrices(markets);
+      
+      // Only update if markets actually changed to prevent unnecessary re-renders
+      const hasChanges = updatedMarkets.some((market, index) => {
+        const original = markets[index];
+        if (!original) return true;
+        // Check if any outcome prices changed
+        return market.market.outcomes.some((outcome, oIndex) => {
+          const originalOutcome = original.market.outcomes[oIndex];
+          return originalOutcome && outcome.price !== originalOutcome.price;
+        });
+      });
+
+      if (hasChanges) {
+        queryClient.setQueryData<PolymarketSportsMarket[]>(
+          QUERY_KEYS.allNbaMarkets,
+          updatedMarkets
+        );
+      }
+    } catch {
+      // Silently handle errors to prevent jittering - no logging
+    }
   }, [markets, queryClient]);
 
   // Set up price refresh polling
@@ -462,23 +496,29 @@ export function useGameMarketData(game: MatchPanelGame | null): GameMarketResult
       // Use the game's scheduled time for the date
       const gameDate = game.scheduledTime ? new Date(game.scheduledTime) : new Date();
       
-      return getGameMarketData(
-        { 
-          name: homeTeam.name, 
-          market: homeTeam.market, 
-          alias: homeTeam.alias 
-        },
-        { 
-          name: awayTeam.name, 
-          market: awayTeam.market, 
-          alias: awayTeam.alias 
-        },
-        gameDate
-      );
+      try {
+        return await getGameMarketData(
+          { 
+            name: homeTeam.name, 
+            market: homeTeam.market, 
+            alias: homeTeam.alias 
+          },
+          { 
+            name: awayTeam.name, 
+            market: awayTeam.market, 
+            alias: awayTeam.alias 
+          },
+          gameDate
+        );
+      } catch {
+        // Silently handle errors to prevent jittering - no logging
+        return null;
+      }
     },
     enabled: !!game,
     staleTime: MARKETS_STALE_TIME,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false, // Disabled to prevent jittering from refetches
+    retry: false, // Don't retry on 404s or other errors
   });
 
   const hasMarkets = Boolean(

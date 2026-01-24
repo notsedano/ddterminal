@@ -56,7 +56,8 @@ export function useOrderbook(tokenId: string | null, options: {
   enabled?: boolean;
   refetchInterval?: number | false;
 } = {}) {
-  const { enabled = true, refetchInterval = ORDERBOOK_REFETCH_INTERVAL } = options;
+  // Disable automatic refetching by default to prevent repeated failed requests
+  const { enabled = true, refetchInterval = false } = options;
 
   const {
     data: orderbook,
@@ -134,7 +135,8 @@ export function useMarketOrderbooks(market: PolymarketSportsMarket | null, optio
   enabled?: boolean;
   refetchInterval?: number | false;
 } = {}) {
-  const { enabled = true, refetchInterval = ORDERBOOK_REFETCH_INTERVAL } = options;
+  // Disable automatic refetching by default to prevent repeated failed requests
+  const { enabled = true, refetchInterval = false } = options;
 
   const tokenIds = useMemo(() => {
     if (!market) return [];

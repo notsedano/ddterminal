@@ -10,18 +10,18 @@ import { useEffect, useState, type ReactNode } from 'react';
  * Chart color palette - consistent across all charts
  */
 export const chartColors = {
-  // Primary series colors
-  primary: '#3b82f6', // blue-500
-  secondary: '#8b5cf6', // violet-500
-  tertiary: '#06b6d4', // cyan-500
-  quaternary: '#f59e0b', // amber-500
-  quinary: '#ec4899', // pink-500
+  // Primary series colors - Blue theme
+  primary: '#60a5fa', // blue-400 (brighter for HUD)
+  secondary: '#3b82f6', // blue-500
+  tertiary: '#93c5fd', // blue-300
+  quaternary: '#2563eb', // blue-600
+  quinary: '#1d4ed8', // blue-700
   
   // Semantic colors
   success: '#22c55e', // green-500
   danger: '#ef4444', // red-500
   warning: '#f59e0b', // amber-500
-  info: '#3b82f6', // blue-500
+  info: '#60a5fa', // blue-400 (HUD blue)
   
   // Orderbook colors
   bid: '#22c55e', // green-500
@@ -33,16 +33,16 @@ export const chartColors = {
   muted: '#6b7280', // gray-500
   mutedLight: 'rgba(107, 114, 128, 0.3)',
   
-  // Series palette for multi-series charts
+  // Series palette for multi-series charts - Blue-focused
   series: [
+    '#60a5fa', // blue-400 (primary HUD blue)
     '#3b82f6', // blue-500
     '#22c55e', // green-500
+    '#93c5fd', // blue-300
+    '#2563eb', // blue-600
     '#f59e0b', // amber-500
     '#ec4899', // pink-500
     '#8b5cf6', // violet-500
-    '#06b6d4', // cyan-500
-    '#f97316', // orange-500
-    '#14b8a6', // teal-500
   ],
 } as const;
 
@@ -53,17 +53,17 @@ const darkTheme = createTheme({
   palette: {
     mode: 'dark',
     background: {
-      default: 'hsl(222.2, 84%, 4.9%)',
-      paper: 'hsl(222.2, 84%, 4.9%)',
+      default: 'hsl(0, 0%, 4%)',
+      paper: 'hsl(0, 0%, 6%)',
     },
     text: {
-      primary: 'hsl(210, 40%, 98%)',
-      secondary: 'hsl(215, 20.2%, 65.1%)',
+      primary: 'hsl(217, 91%, 85%)',
+      secondary: 'hsl(217, 30%, 65%)',
     },
-    divider: 'hsl(217.2, 32.6%, 17.5%)',
+    divider: 'hsl(217, 91%, 50%)',
   },
   typography: {
-    fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+    fontFamily: "'Consolas', 'Courier New', monospace",
     fontSize: 12,
   },
 });

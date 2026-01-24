@@ -197,7 +197,10 @@ export function MainLayout({ agentId }: MainLayoutProps) {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-background text-foreground">
+    <div className="h-screen flex flex-col bg-background text-foreground hud-scanlines relative">
+      {/* HUD Background Overlay */}
+      <div className="hud-bg-overlay" />
+      
       <Header 
         showTerminal={showTerminal} 
         onToggleTerminal={() => setShowTerminal(!showTerminal)}
@@ -205,7 +208,7 @@ export function MainLayout({ agentId }: MainLayoutProps) {
         onToggleMatchPanel={() => setShowMatchPanel(!showMatchPanel)}
         hasLiveGames={liveGames.length > 0}
       />
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative z-10">
         <Sidebar
           currentSessionId={currentSessionId}
           onSessionSelect={handleSessionSelect}

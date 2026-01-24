@@ -12,9 +12,12 @@ import { useGameMarketData, usePolymarketForGame } from '@/hooks/usePolymarketNB
 import type { ParsedGameMarket } from '@/services/api/polymarket';
 import { MatchStatusBadge } from './MatchStatusBadge';
 import { MarketDetails } from './MarketDetails';
+import { MarketButton } from './MarketButton';
+import { ShinyButton } from './ShinyButton';
 import { TeamLogo } from '@/components/TeamLogo';
 import { Clock, Calendar, ExternalLink, TrendingUp, Wifi, Activity, ArrowUpDown, Target, DollarSign, ChevronDown, ChevronUp, BarChart3, LineChart as LineChartIcon } from 'lucide-react';
 import { PriceLineChart } from '@/components/charts';
+import { HudChartWrapper } from '@/components/ui/HudChartWrapper';
 import { format } from 'date-fns';
 
 interface MatchCardProps {
@@ -259,7 +262,7 @@ function TeamRow({ team, score, record, odds, marketType, line, isAway, isFirst 
           </span>
           <div className="flex items-center gap-2">
             {record && (
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-[10px] text-muted-foreground hud-data">
                 {record.wins}-{record.losses}
               </span>
             )}
@@ -275,21 +278,21 @@ function TeamRow({ team, score, record, odds, marketType, line, isAway, isFirst 
         {odds !== null && (
           <div className="flex flex-col items-end">
             <span className={cn(
-              'text-xs font-medium',
+              'text-xs font-medium hud-data',
               isFirst ? 'text-green-400' : 'text-red-400'
             )}>
               {formatOddsDisplay()}
             </span>
             {/* American odds on second line for moneyline */}
             {marketType === 'MONEYLINE' && (
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-[10px] text-muted-foreground hud-data">
                 {formatPriceAsAmericanOdds(odds)}
               </span>
             )}
           </div>
         )}
         <span className={cn(
-          'text-2xl font-bold tabular-nums min-w-[2.5rem] text-right',
+          'text-2xl font-bold tabular-nums min-w-[2.5rem] text-right hud-data',
           hasScore ? 'text-foreground' : 'text-muted-foreground/50'
         )}>
           {hasScore ? score : '-'}
@@ -356,36 +359,39 @@ function GameMarketDisplay({ market, totalVolume, eventSlug }: GameMarketDisplay
         </div>
         <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
           <DollarSign className="h-3 w-3" />
-          <span>Vol: {formatVolume(market.volume)}</span>
+          <span className="hud-data">Vol: {formatVolume(market.volume)}</span>
         </div>
       </div>
 
       {/* Outcomes Grid */}
       <div className="grid grid-cols-2 gap-3">
-        {market.outcomes.map((outcome, index) => (
-          <div
-            key={outcome.tokenId || index}
-            className={cn(
-              'flex flex-col items-center gap-1 p-3 rounded-lg border',
-              index === 0 
-                ? 'bg-green-500/10 border-green-500/30' 
-                : 'bg-red-500/10 border-red-500/30'
-            )}
-          >
-            <span className="text-xs text-muted-foreground truncate max-w-full">
-              {outcome.name}
-            </span>
-            <span className={cn(
-              'text-xl font-bold',
-              index === 0 ? 'text-green-400' : 'text-red-400'
-            )}>
-              {formatPriceAsPercentage(outcome.price)}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              {formatPriceAsAmericanOdds(outcome.price)}
-            </span>
-          </div>
-        ))}
+        {market.outcomes.map((outcome, index) => {
+          // Determine which outcome has the higher percentage
+          const higherIndex = market.outcomes[0].price >= market.outcomes[1]?.price ? 0 : 1;
+          const isHigher = index === higherIndex;
+          
+          // Use ShinyButton for losing team (lower percentage), MarketButton for winning team
+          if (isHigher) {
+            return (
+              <MarketButton
+                key={outcome.tokenId || index}
+                name={outcome.name}
+                percentage={formatPriceAsPercentage(outcome.price)}
+                odds={formatPriceAsAmericanOdds(outcome.price)}
+                isHigher={isHigher}
+              />
+            );
+          } else {
+            return (
+              <ShinyButton
+                key={outcome.tokenId || index}
+                name={outcome.name}
+                percentage={formatPriceAsPercentage(outcome.price)}
+                odds={formatPriceAsAmericanOdds(outcome.price)}
+              />
+            );
+          }
+        })}
       </div>
 
       {/* Market Question */}
@@ -398,7 +404,7 @@ function GameMarketDisplay({ market, totalVolume, eventSlug }: GameMarketDisplay
       {/* Total Event Volume */}
       {totalVolume > 0 && (
         <div className="flex items-center justify-center gap-1 text-[10px] text-muted-foreground/70">
-          <span>Event Volume: ${formatVolume(totalVolume)}</span>
+          <span className="hud-data">Event Volume: ${formatVolume(totalVolume)}</span>
         </div>
       )}
 
@@ -476,12 +482,14 @@ function GameMarketDisplay({ market, totalVolume, eventSlug }: GameMarketDisplay
 
               {/* Price Chart */}
               {activeChartTab === 'price' && selectedOutcome?.tokenId && (
-                <PriceLineChart
-                  tokenId={selectedOutcome.tokenId}
-                  outcomeName={selectedOutcome.name}
-                  height={180}
-                  showTimeSelector={true}
-                />
+                <HudChartWrapper showScanlines={true} variant="default">
+                  <PriceLineChart
+                    tokenId={selectedOutcome.tokenId}
+                    outcomeName={selectedOutcome.name}
+                    height={180}
+                    showTimeSelector={true}
+                  />
+                </HudChartWrapper>
               )}
 
               {/* Compare Chart - Both outcomes overlaid */}
@@ -501,12 +509,14 @@ function GameMarketDisplay({ market, totalVolume, eventSlug }: GameMarketDisplay
                     ))}
                   </div>
                   {/* Show first outcome chart as representative */}
-                  <PriceLineChart
-                    tokenId={market.outcomes[0].tokenId}
-                    outcomeName={market.outcomes[0].name}
-                    height={180}
-                    showTimeSelector={true}
-                  />
+                  <HudChartWrapper showScanlines={true} variant="default">
+                    <PriceLineChart
+                      tokenId={market.outcomes[0].tokenId}
+                      outcomeName={market.outcomes[0].name}
+                      height={180}
+                      showTimeSelector={true}
+                    />
+                  </HudChartWrapper>
                 </div>
               )}
             </div>

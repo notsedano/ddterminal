@@ -944,36 +944,95 @@ function buildGameSlug(
   return `nba-${awayAlias}-${homeAlias}-${dateStr}`;
 }
 
+// Cache for failed slugs to prevent repeated 404s
+const failedSlugCache = new Set<string>();
+const FAILED_SLUG_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const failedSlugTimestamps = new Map<string, number>();
+
 /**
  * Fetch market data by slug using the Polymarket slug API
  * This is the most reliable way to get per-game markets
  */
 async function fetchMarketBySlug(slug: string): Promise<PolymarketMarket | null> {
-  const response = await fetch(`${GAMMA_API}/markets/slug/${slug}`, {
-    headers: { 'Accept': 'application/json' },
-  });
-  
-  if (!response.ok) {
+  // Check if this slug recently failed (404)
+  const failedTimestamp = failedSlugTimestamps.get(slug);
+  if (failedSlugCache.has(slug) && failedTimestamp) {
+    // If it failed recently (within TTL), skip the request
+    if (Date.now() - failedTimestamp < FAILED_SLUG_CACHE_TTL) {
+      return null;
+    }
+    // Cache expired, remove it
+    failedSlugCache.delete(slug);
+    failedSlugTimestamps.delete(slug);
+  }
+
+  try {
+    const response = await fetch(`${GAMMA_API}/markets/slug/${slug}`, {
+      headers: { 'Accept': 'application/json' },
+    });
+    
+    if (!response.ok) {
+      // Cache 404s to prevent repeated failed requests
+      if (response.status === 404) {
+        failedSlugCache.add(slug);
+        failedSlugTimestamps.set(slug, Date.now());
+      }
+      return null;
+    }
+    
+    // Success - remove from failed cache if it was there
+    failedSlugCache.delete(slug);
+    failedSlugTimestamps.delete(slug);
+    
+    return response.json();
+  } catch (error) {
+    // Network errors - don't cache, just return null
     return null;
   }
-  
-  return response.json();
 }
 
 /**
  * Fetch event data by slug for spread/total markets
  */
 async function fetchEventBySlug(slug: string): Promise<PolymarketEvent | null> {
-  const response = await fetch(`${GAMMA_API}/events?slug=${encodeURIComponent(slug)}`, {
-    headers: { 'Accept': 'application/json' },
-  });
-  
-  if (!response.ok) {
+  // Check if this slug recently failed (reuse the same cache)
+  const failedTimestamp = failedSlugTimestamps.get(`event:${slug}`);
+  if (failedSlugCache.has(`event:${slug}`) && failedTimestamp) {
+    if (Date.now() - failedTimestamp < FAILED_SLUG_CACHE_TTL) {
+      return null;
+    }
+    failedSlugCache.delete(`event:${slug}`);
+    failedSlugTimestamps.delete(`event:${slug}`);
+  }
+
+  try {
+    const response = await fetch(`${GAMMA_API}/events?slug=${encodeURIComponent(slug)}`, {
+      headers: { 'Accept': 'application/json' },
+    });
+    
+    if (!response.ok) {
+      // Cache failures to prevent repeated requests
+      failedSlugCache.add(`event:${slug}`);
+      failedSlugTimestamps.set(`event:${slug}`, Date.now());
+      return null;
+    }
+    
+    const events = await response.json();
+    const event = events?.[0] || null;
+    
+    // If no event found, cache this as a "failure" too
+    if (!event) {
+      failedSlugCache.add(`event:${slug}`);
+      failedSlugTimestamps.set(`event:${slug}`, Date.now());
+    }
+    
+    return event;
+  } catch {
+    // Network errors - cache temporarily to avoid rapid retries
+    failedSlugCache.add(`event:${slug}`);
+    failedSlugTimestamps.set(`event:${slug}`, Date.now());
     return null;
   }
-  
-  const events = await response.json();
-  return events?.[0] || null;
 }
 
 /**
