@@ -1,0 +1,44 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "functions": {
+    "api/**/*.ts": {
+      "runtime": "@vercel/node@3.0.0"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/sports/schedule",
+      "destination": "/api/sports/schedule"
+    },
+    {
+      "source": "/api/sports/injuries",
+      "destination": "/api/sports/injuries"
+    },
+    {
+      "source": "/api/sports/live",
+      "destination": "/api/sports/live"
+    },
+    {
+      "source": "/api/sports/game/:gameId",
+      "destination": "/api/sports/game/[gameId]"
+    },
+    {
+      "source": "/api/polymarket/gamma/:path*",
+      "destination": "/api/polymarket/gamma/[...path]"
+    },
+    {
+      "source": "/api/polymarket/clob/:path*",
+      "destination": "/api/polymarket/clob/[...path]"
+    },
+    {
+      "source": "/api/polymarket/events",
+      "destination": "/api/polymarket/events"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

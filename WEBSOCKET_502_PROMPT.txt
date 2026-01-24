@@ -1,0 +1,29 @@
+Our frontend is getting 502 Bad Gateway errors when connecting to the WebSocket endpoint. REST API works fine, but WebSocket connections fail.
+
+**Error:**
+WebSocket connection to 'wss://3a6615a6-aeris-agent.containers.elizacloud.ai/ws/?EIO=4&transport=websocket' failed: Error during WebSocket handshake: Unexpected response code: 502
+
+**What works:**
+- All REST API endpoints (https://3a6615a6-aeris-agent.containers.elizacloud.ai/api/*) work perfectly
+- Sessions, messages, agents - all REST calls succeed
+
+**What's broken:**
+- WebSocket connections to wss://3a6615a6-aeris-agent.containers.elizacloud.ai/ws/ return 502
+
+**Client code:**
+```javascript
+const socket = io('https://3a6615a6-aeris-agent.containers.elizacloud.ai', {
+  path: '/ws',
+  transports: ['websocket'],
+});
+```
+
+**Questions:**
+1. Is the Socket.IO server running and listening on /ws?
+2. Is the reverse proxy (nginx/load balancer) configured for WebSocket upgrades?
+3. Is the /ws path correct, or should it be /socket.io or something else?
+4. Are there any logs showing WebSocket connection attempts?
+5. Are there firewall/security rules blocking WebSocket upgrades?
+
+**Quick test:**
+Can you verify the WebSocket endpoint is accessible? The 502 suggests the proxy can't reach the backend WebSocket server.
