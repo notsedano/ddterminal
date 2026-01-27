@@ -3,10 +3,10 @@
  * when the current match changes or on initial page load
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMatchPanel } from './useMatchPanel';
 import { useMatchupSessionContext } from '@/contexts/MatchupSessionContext';
-import type { MatchPanelGame } from '@/types';
+import { useSessions } from './useSession';
 
 interface UseAutoMatchupSessionOptions {
   /** Whether to auto-create sessions (default: true) */
@@ -18,12 +18,13 @@ interface UseAutoMatchupSessionOptions {
 /**
  * Automatically creates and switches to matchup sessions when:
  * 1. Page loads and there's a current match (only if no existing sessions)
- * 2. User switches between matchups
+ * 2. User switches between matchups (always creates if no session exists for that matchup)
  */
 export function useAutoMatchupSession(options: UseAutoMatchupSessionOptions = {}) {
   const { enabled = true, onSessionReady } = options;
   const { currentMatch } = useMatchPanel({ autoRefresh: true });
   const matchupContext = useMatchupSessionContext();
+  const { data: allSessions = [] } = useSessions();
   
   // Track the last game ID we processed to avoid duplicate creation
   const lastProcessedGameIdRef = useRef<string | null>(null);
@@ -31,6 +32,15 @@ export function useAutoMatchupSession(options: UseAutoMatchupSessionOptions = {}
   const hasCheckedInitialLoadRef = useRef(false);
   // Track if we're currently creating a session
   const isCreatingRef = useRef(false);
+  // Track if we've checked for existing sessions on initial load
+  const [hasCheckedExistingSessions, setHasCheckedExistingSessions] = useState(false);
+
+  // Check for existing sessions on initial load (only once)
+  useEffect(() => {
+    if (hasCheckedExistingSessions || allSessions.length === 0) {
+      setHasCheckedExistingSessions(true);
+    }
+  }, [allSessions.length, hasCheckedExistingSessions]);
 
   useEffect(() => {
     if (!enabled || !currentMatch?.game || matchupContext.isCreating || isCreatingRef.current) {
@@ -59,7 +69,26 @@ export function useAutoMatchupSession(options: UseAutoMatchupSessionOptions = {}
       return;
     }
 
+    // On initial load, only create if there are no existing sessions at all
+    if (!hasCheckedInitialLoadRef.current) {
+      // Wait for session check to complete
+      if (!hasCheckedExistingSessions) {
+        return;
+      }
+      
+      // If there are any existing sessions (not matchup-specific), don't auto-create on initial load
+      // This allows users to continue their previous conversations
+      if (allSessions.length > 0) {
+        hasCheckedInitialLoadRef.current = true;
+        lastProcessedGameIdRef.current = gameId;
+        return;
+      }
+    }
+
     // No existing session - create one automatically
+    // This happens when:
+    // 1. Initial load with no existing sessions
+    // 2. User switches to a different matchup
     isCreatingRef.current = true;
     matchupContext
       .startMatchupChat(game)
@@ -81,5 +110,7 @@ export function useAutoMatchupSession(options: UseAutoMatchupSessionOptions = {}
     currentMatch?.game?.id,
     matchupContext,
     onSessionReady,
+    hasCheckedExistingSessions,
+    allSessions.length,
   ]);
 }

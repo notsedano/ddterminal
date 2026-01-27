@@ -8,7 +8,8 @@ import { useSession } from '@/hooks/useSession';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNBASchedule } from '@/hooks/useNBASchedule';
 import { cn } from '@/utils/cn';
-import { MatchupSessionProvider } from '@/contexts/MatchupSessionContext';
+import { MatchupSessionProvider, useMatchupSessionContext } from '@/contexts/MatchupSessionContext';
+import { useAutoMatchupSession } from '@/hooks/useAutoMatchupSession';
 import type { Session } from '@/types';
 
 export interface MainLayoutProps {
@@ -16,6 +17,22 @@ export interface MainLayoutProps {
 }
 
 export function MainLayout({ agentId }: MainLayoutProps) {
+  // Handle when a matchup session is started from MatchPanel
+  const handleMatchupSessionStarted = useCallback((session: Session) => {
+    // This will be handled by MainLayoutContent via the context
+  }, []);
+
+  return (
+    <MatchupSessionProvider agentId={agentId} onSessionStarted={handleMatchupSessionStarted}>
+      <MainLayoutContent agentId={agentId} />
+    </MatchupSessionProvider>
+  );
+}
+
+/**
+ * Inner component that has access to MatchupSessionContext
+ */
+function MainLayoutContent({ agentId }: { agentId: string }) {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [roomId, setRoomId] = useState<string | null>(null);
   const [showTerminal, setShowTerminal] = useState(false);
@@ -30,15 +47,42 @@ export function MainLayout({ agentId }: MainLayoutProps) {
   // Get live game status for header indicator
   const { liveGames } = useNBASchedule({ autoRefreshLive: showMatchPanel });
 
+  // Get matchup context for auto-session creation
+  const matchupContext = useMatchupSessionContext();
+
+  // Auto-create and switch to matchup sessions
+  useAutoMatchupSession({
+    enabled: true,
+    onSessionReady: useCallback((sessionId: string) => {
+      setCurrentSessionId(sessionId);
+      hasCreatedSession.current = true;
+    }, []),
+  });
+
   useEffect(() => {
     if (session) {
       setRoomId(session.channelId || session.sessionId);
     }
   }, [session]);
 
-  // Load existing session from storage on mount (NO auto-creation)
+  // Also watch for active matchup session changes
+  useEffect(() => {
+    if (matchupContext.activeMatchupSessionId && matchupContext.activeMatchupSessionId !== currentSessionId) {
+      setCurrentSessionId(matchupContext.activeMatchupSessionId);
+      hasCreatedSession.current = true;
+    }
+  }, [matchupContext.activeMatchupSessionId, currentSessionId]);
+
+  // Load existing session from storage on mount (only if no matchup session is active)
   useEffect(() => {
     if (currentSessionId || !agentId || hasCreatedSession.current) return;
+    
+    // If there's an active matchup session, use that instead
+    if (matchupContext.activeMatchupSessionId) {
+      setCurrentSessionId(matchupContext.activeMatchupSessionId);
+      hasCreatedSession.current = true;
+      return;
+    }
     
     const loadExistingSession = async () => {
       try {
@@ -52,14 +96,14 @@ export function MainLayout({ agentId }: MainLayoutProps) {
           setRoomId(latestSession.channelId);
           hasCreatedSession.current = true;
         }
-        // If no sessions exist, just show empty state - user can click "New Session"
+        // If no sessions exist, auto-session creation will handle it
       } catch (error) {
         console.error('Error checking existing sessions:', error);
       }
     };
     
     loadExistingSession();
-  }, [currentSessionId, agentId]);
+  }, [currentSessionId, agentId, matchupContext.activeMatchupSessionId]);
 
   const handleSessionSelect = async (sessionId: string) => {
     setCurrentSessionId(sessionId);
@@ -140,15 +184,7 @@ export function MainLayout({ agentId }: MainLayoutProps) {
     isResizing.current = true;
   };
 
-  // Handle when a matchup session is started from MatchPanel
-  const handleMatchupSessionStarted = useCallback((session: Session) => {
-    setCurrentSessionId(session.sessionId);
-    setRoomId(session.channelId || session.sessionId);
-    hasCreatedSession.current = true;
-  }, []);
-
   return (
-    <MatchupSessionProvider agentId={agentId} onSessionStarted={handleMatchupSessionStarted}>
     <div className="h-screen flex flex-col bg-background text-foreground hud-scanlines relative">
       {/* HUD Background Overlay */}
       <div className="hud-bg-overlay" />
@@ -223,6 +259,5 @@ export function MainLayout({ agentId }: MainLayoutProps) {
       {/* Mobile Match Panel (rendered outside main layout for full-screen overlay) */}
       {!showMatchPanel && <MatchPanel defaultExpanded={false} />}
     </div>
-    </MatchupSessionProvider>
   );
 }
