@@ -25,7 +25,8 @@ export const InjuryReport = memo(function InjuryReport({
   className,
   compact = false,
 }: InjuryReportProps) {
-  const [isExpanded, setIsExpanded] = useState(!compact);
+  // Injury report minimized by default
+  const [isExpanded, setIsExpanded] = useState(false);
   const totalInjuries = (homeInjuries?.players?.length ?? 0) + (awayInjuries?.players?.length ?? 0);
   const hasInjuries = totalInjuries > 0;
 
@@ -51,7 +52,7 @@ export const InjuryReport = memo(function InjuryReport({
   }
 
   return (
-    <div className={cn('flex flex-col gap-3 border-t border-border pt-3', className)}>
+    <div className={cn('flex flex-col gap-2 border-t border-border pt-2', className)}>
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className="flex items-center justify-between w-full text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"

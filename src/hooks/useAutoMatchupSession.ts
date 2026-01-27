@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMatchPanel } from './useMatchPanel';
 import { useMatchupSessionContext } from '@/contexts/MatchupSessionContext';
 import { useSessions } from './useSession';
+import { useAuth } from './useAuth';
 
 interface UseAutoMatchupSessionOptions {
   /** Whether to auto-create sessions (default: true) */
@@ -26,6 +27,10 @@ export function useAutoMatchupSession(options: UseAutoMatchupSessionOptions = {}
   const matchupContext = useMatchupSessionContext();
   const { data: allSessions = [] } = useSessions();
   
+  // Get auth state - we need to wait for auth to be fully ready before creating sessions
+  // to ensure sessions are properly saved to Supabase
+  const { isAuthenticated, supabaseUserId, isLoading: isAuthLoading } = useAuth();
+  
   // Track the last game ID we processed to avoid duplicate creation
   const lastProcessedGameIdRef = useRef<string | null>(null);
   // Track if we've done initial load check
@@ -44,6 +49,19 @@ export function useAutoMatchupSession(options: UseAutoMatchupSessionOptions = {}
 
   useEffect(() => {
     if (!enabled || !currentMatch?.game || matchupContext.isCreating || isCreatingRef.current) {
+      return;
+    }
+
+    // IMPORTANT: Wait for auth to be fully ready before creating sessions
+    // This ensures that if the user is authenticated, the supabaseUserId is populated
+    // so sessions are properly saved to Supabase (avoiding foreign key errors on messages)
+    if (isAuthLoading) {
+      return;
+    }
+    
+    // If user is authenticated but supabaseUserId isn't ready yet, wait
+    // (supabaseUserId is fetched async after Privy auth completes)
+    if (isAuthenticated && !supabaseUserId) {
       return;
     }
 
@@ -112,5 +130,8 @@ export function useAutoMatchupSession(options: UseAutoMatchupSessionOptions = {}
     onSessionReady,
     hasCheckedExistingSessions,
     allSessions.length,
+    isAuthLoading,
+    isAuthenticated,
+    supabaseUserId,
   ]);
 }

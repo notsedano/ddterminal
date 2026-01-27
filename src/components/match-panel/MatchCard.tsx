@@ -64,8 +64,8 @@ export const MatchCard = memo(function MatchCard({ game, market: marketProp, cla
   // Fetch betting indicators
   const { indicators } = useBettingIndicators(game);
   
-  // Track expanded sections
-  const [showMatchHistory, setShowMatchHistory] = useState(false);
+  // Track expanded sections - Match History expanded by default
+  const [showMatchHistory, setShowMatchHistory] = useState(true);
   const [showBettingSignals, setShowBettingSignals] = useState(false);
   
   // Track selected market type
@@ -112,7 +112,7 @@ export const MatchCard = memo(function MatchCard({ game, market: marketProp, cla
   const isLoadingMarkets = gameMarkets.isLoading;
 
   return (
-    <div className={cn('flex flex-col gap-4', className)}>
+    <div className={cn('flex flex-col gap-2', className)}>
       {/* Status Badge */}
       <div className="flex items-center justify-between">
         <div className="flex-1" />
@@ -122,12 +122,12 @@ export const MatchCard = memo(function MatchCard({ game, market: marketProp, cla
 
       {/* Time Until Game (for upcoming games) */}
       {isUpcoming && (
-        <div className="flex flex-col items-center gap-1">
+        <div className="flex flex-col items-center gap-0.5">
           <div className="flex items-center gap-1.5 text-blue-400">
-            <Clock className="h-4 w-4" />
+            <Clock className="h-3.5 w-3.5" />
             <span className="text-sm font-semibold">{formatTimeUntilGame(game.scheduledTime)}</span>
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
             <Calendar className="h-3 w-3" />
             <span>{format(game.scheduledTime, 'h:mm a')}</span>
           </div>
@@ -135,7 +135,7 @@ export const MatchCard = memo(function MatchCard({ game, market: marketProp, cla
       )}
 
       {/* Teams Display */}
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-2">
         {(() => {
           // Get odds for both teams using robust matching
           const awayOdds = getTeamOddsFromParsedMarket(currentParsedMarket, game.away.team.name, game.away.team.alias, false);
@@ -212,7 +212,7 @@ export const MatchCard = memo(function MatchCard({ game, market: marketProp, cla
       )}
 
       {/* Market Data */}
-      <div className="border-t border-border pt-3">
+      <div className="border-t border-border pt-2">
         {isLoadingMarkets ? (
           <div className="flex items-center justify-center py-4">
             <div className="animate-pulse flex gap-2 items-center text-muted-foreground">
@@ -246,7 +246,7 @@ export const MatchCard = memo(function MatchCard({ game, market: marketProp, cla
 
       {/* Match History Section */}
       {(homeHistory && awayHistory) && (
-        <div className="border-t border-border pt-3 mt-1">
+        <div className="border-t border-border pt-2">
           <button
             onClick={() => setShowMatchHistory(!showMatchHistory)}
             className="flex items-center justify-between w-full px-2 py-1.5 rounded-lg hover:bg-muted/50 transition-colors"
@@ -278,7 +278,7 @@ export const MatchCard = memo(function MatchCard({ game, market: marketProp, cla
           </button>
 
           {showMatchHistory && (
-            <div className="mt-3">
+            <div className="mt-2">
               <StreakPanel
                 homeHistory={homeHistory}
                 awayHistory={awayHistory}
@@ -292,7 +292,7 @@ export const MatchCard = memo(function MatchCard({ game, market: marketProp, cla
 
       {/* Betting Signals Section */}
       {indicators && (
-        <div className="border-t border-border pt-3 mt-1">
+        <div className="border-t border-border pt-2">
           <button
             onClick={() => setShowBettingSignals(!showBettingSignals)}
             className="flex items-center justify-between w-full px-2 py-1.5 rounded-lg hover:bg-muted/50 transition-colors"
@@ -314,7 +314,7 @@ export const MatchCard = memo(function MatchCard({ game, market: marketProp, cla
           </button>
 
           {showBettingSignals && (
-            <div className="mt-3">
+            <div className="mt-2">
               <BettingSignalsPanel
                 indicators={indicators}
                 homeAlias={game.home.team.alias}
@@ -452,7 +452,8 @@ interface GameMarketDisplayProps {
  * GameMarketDisplay - memoized for stable market data
  */
 const GameMarketDisplay = memo(function GameMarketDisplay({ market, totalVolume, eventSlug }: GameMarketDisplayProps) {
-  const [showCharts, setShowCharts] = useState(false);
+  // Charts & Analytics expanded by default
+  const [showCharts, setShowCharts] = useState(true);
   const [activeChartTab, setActiveChartTab] = useState<'price' | 'compare'>('price');
   const [selectedOutcomeIndex, setSelectedOutcomeIndex] = useState(0);
 
@@ -489,10 +490,10 @@ const GameMarketDisplay = memo(function GameMarketDisplay({ market, totalVolume,
   const hasTokenId = Boolean(selectedOutcome?.tokenId);
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-2">
       {/* Market Type Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-primary">
+        <div className="flex items-center gap-1.5 text-primary">
           {getMarketTypeIcon()}
           <span className="text-sm font-medium">{getMarketTypeLabel()}</span>
         </div>
@@ -503,7 +504,7 @@ const GameMarketDisplay = memo(function GameMarketDisplay({ market, totalVolume,
       </div>
 
       {/* Outcomes Grid */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-2">
         {market.outcomes.map((outcome, index) => {
           // Determine which outcome has the higher percentage
           const higherIndex = market.outcomes[0].price >= market.outcomes[1]?.price ? 0 : 1;
@@ -552,7 +553,7 @@ const GameMarketDisplay = memo(function GameMarketDisplay({ market, totalVolume,
 
       {/* Charts Section */}
       {hasTokenId && (
-        <div className="border-t border-border pt-3 mt-1">
+        <div className="border-t border-border pt-2">
           {/* Chart Toggle Header */}
           <button
             onClick={() => setShowCharts(!showCharts)}
@@ -571,7 +572,7 @@ const GameMarketDisplay = memo(function GameMarketDisplay({ market, totalVolume,
 
           {/* Expanded Chart Content */}
           {showCharts && (
-            <div className="mt-3 space-y-3">
+            <div className="mt-2 space-y-2">
               {/* Chart Tabs */}
               <div className="flex items-center gap-1 p-1 bg-muted/30 rounded-lg">
                 <button

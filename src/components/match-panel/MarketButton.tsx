@@ -20,23 +20,23 @@ export const MarketButton: React.FC<MarketButtonProps> = ({
 }) => {
   const content = (
     <>
-      <span className="text-xs text-muted-foreground truncate max-w-full">
+      <span className="text-[10px] text-muted-foreground truncate max-w-full leading-tight">
         {name}
       </span>
       <span className={cn(
-        'text-xl font-bold hud-data',
+        'text-lg font-bold hud-data leading-tight',
         isHigher ? 'text-green-400' : 'text-red-400'
       )}>
         {percentage}
       </span>
-      <span className="text-xs text-muted-foreground hud-data">
+      <span className="text-[10px] text-muted-foreground hud-data leading-tight">
         {odds}
       </span>
     </>
   );
 
   const buttonStyles = cn(
-    'rainbow-border rainbow-border-no-glow relative w-[140px] h-[94px] flex flex-col items-center justify-center gap-1 px-4 rounded-xl border-none text-white cursor-pointer font-black transition-all duration-200 bg-black/80'
+    'rainbow-border rainbow-border-no-glow relative w-[140px] h-[68px] flex flex-col items-center justify-center gap-0.5 px-3 rounded-xl border-none text-white cursor-pointer font-black transition-all duration-200 bg-black/80'
   );
 
   return (

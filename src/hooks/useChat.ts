@@ -17,7 +17,10 @@ import {
   saveMessageToSupabase,
   getMessagesFromSupabase,
   isSupabaseConfigured,
+  getSessionFromSupabase,
+  saveSessionToSupabase,
 } from '@/services/supabase';
+import { getSession as getLocalSession } from '@/services/storage/conversationStorage';
 import { useSocket } from './useSocket';
 import { useAuth } from './useAuth';
 import { useMemory, useMemoryExtraction } from './useMemory';
@@ -35,6 +38,31 @@ export interface UseChatOptions {
 }
 
 /**
+ * Ensure session exists in Supabase before saving messages
+ * This handles the case where a session was created before auth was ready
+ */
+async function ensureSessionInSupabase(
+  sessionId: string,
+  supabaseUserId: string
+): Promise<void> {
+  // Check if session exists in Supabase
+  const supabaseSession = await getSessionFromSupabase(sessionId);
+  
+  if (!supabaseSession) {
+    // Session doesn't exist in Supabase - try to get it from local storage and save it
+    const localSession = await getLocalSession(sessionId);
+    
+    if (localSession) {
+      console.log(`[useChat] Session ${sessionId.slice(0, 8)}... not in Supabase, saving from local storage`);
+      await saveSessionToSupabase(localSession, supabaseUserId);
+    } else {
+      // Session doesn't exist locally either - this shouldn't happen
+      console.warn(`[useChat] Session ${sessionId.slice(0, 8)}... not found in local storage or Supabase`);
+    }
+  }
+}
+
+/**
  * Save message to both local and Supabase storage
  */
 async function saveMessage(
@@ -47,6 +75,10 @@ async function saveMessage(
 
   // Save to Supabase if authenticated
   if (isAuthenticated && supabaseUserId && isSupabaseConfigured()) {
+    // Ensure session exists in Supabase first (handles race condition where
+    // session was created before supabaseUserId was populated)
+    await ensureSessionInSupabase(message.sessionId, supabaseUserId);
+    
     await saveMessageToSupabase(message, supabaseUserId);
   }
 }

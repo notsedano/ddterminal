@@ -18,14 +18,14 @@ export function ShinyButton({
   onClick 
 }: ShinyButtonProps) {
   const content = (
-    <span className="flex flex-col items-center justify-center gap-1 w-full">
-      <span className="text-xs text-muted-foreground truncate max-w-full">
+    <span className="flex flex-col items-center justify-center gap-0.5 w-full">
+      <span className="text-[10px] text-muted-foreground truncate max-w-full leading-tight">
         {name}
       </span>
-      <span className="text-xl font-bold hud-data text-red-400">
+      <span className="text-lg font-bold hud-data text-red-400 leading-tight">
         {percentage}
       </span>
-      <span className="text-xs text-muted-foreground hud-data">
+      <span className="text-[10px] text-muted-foreground hud-data leading-tight">
         {odds}
       </span>
     </span>
