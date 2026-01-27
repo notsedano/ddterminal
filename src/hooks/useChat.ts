@@ -5,7 +5,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { sendMessage as sendMessageAPI } from '@/services/api/messages';
 import { getMessages as getMessagesAPI } from '@/services/api/sessions';
 import { SessionNotFoundError } from '@/services/api/client';
@@ -19,6 +19,9 @@ import {
   isSupabaseConfigured,
   getSessionFromSupabase,
   saveSessionToSupabase,
+  sessionHasKnowledge,
+  searchSessionKnowledge,
+  formatSearchResultsForContext,
 } from '@/services/supabase';
 import { getSession as getLocalSession } from '@/services/storage/conversationStorage';
 import { useSocket } from './useSocket';
@@ -26,7 +29,9 @@ import { useAuth } from './useAuth';
 import { useMemory, useMemoryExtraction } from './useMemory';
 import { getUserId } from '@/utils/storage';
 import { convertApiMessageToMessage, mergeMessages } from '@/utils/messageUtils';
+import { createSSEStream, type SSEChunkEvent, type SSEMessageEvent } from '@/utils/sse';
 import type { Message, SocketMessageEvent } from '@/types';
+import type { KnowledgeSearchResult } from '@/types/knowledge';
 
 export interface UseChatOptions {
   sessionId: string | null;
@@ -35,6 +40,8 @@ export interface UseChatOptions {
   onSessionInvalid?: (sessionId: string) => void;
   /** Enable memory context loading for personalized interactions */
   enableMemory?: boolean;
+  /** Enable knowledge context from session articles for RAG */
+  enableKnowledge?: boolean;
 }
 
 /**
@@ -83,10 +90,12 @@ async function saveMessage(
   }
 }
 
-export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMemory = true }: UseChatOptions) {
+export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMemory = true, enableKnowledge = true }: UseChatOptions) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingMessage, setStreamingMessage] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const [knowledgeContext, setKnowledgeContext] = useState<KnowledgeSearchResult[]>([]);
+  const [sseConnected, setSseConnected] = useState(false); // Track actual SSE connection state
   const isNewSessionRef = useRef(true);
   const userId = getUserId();
   const { isAuthenticated, supabaseUserId, isLoading: isAuthLoading } = useAuth();
@@ -119,15 +128,36 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
   // Memory extraction for learning from conversations
   const { extractEntities, saveFact, saveIntent, summarizeConversation } = useMemoryExtraction(agentId, sessionId);
 
+  // Check if session has knowledge articles
+  const { data: hasKnowledge = false } = useQuery({
+    queryKey: ['session-has-knowledge', sessionId],
+    queryFn: () => sessionHasKnowledge(sessionId!),
+    enabled: !!sessionId && enableKnowledge,
+    staleTime: 30_000,
+  });
+
+  // Socket.IO connection - optional for bidirectional features (non-blocking)
+  // SSE is used for streaming instead
   const socket = useSocket({
     agentId,
     roomId,
-    enabled: !!sessionId,
+    enabled: false, // Disabled - using SSE for streaming instead
   });
 
   const sendMessageMutation = useMutation({
     mutationFn: async (text: string) => {
       if (!sessionId) throw new Error('No session available');
+
+      // Search for relevant knowledge context if session has knowledge
+      if (enableKnowledge && hasKnowledge) {
+        searchSessionKnowledge(sessionId, text, 5)
+          .then((results) => {
+            setKnowledgeContext(results);
+          })
+          .catch((err) => {
+            console.warn('[useChat] Knowledge search failed:', err);
+          });
+      }
 
       const response = await sendMessageAPI(sessionId, {
         text,
@@ -213,40 +243,138 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
     },
   });
 
+  // Ref to track current streaming message for onDone handler
+  const streamingMessageRef = useRef('');
   useEffect(() => {
-    const handler = (data: SocketMessageEvent) => {
-      if (data.text) {
-        setStreamingMessage((prev) => prev + data.text);
-      }
+    streamingMessageRef.current = streamingMessage;
+  }, [streamingMessage]);
+
+  // SSE connection for streaming AI responses
+  useEffect(() => {
+    if (!sessionId || !agentId || !roomId) {
+      console.log('[useChat] Skipping SSE - missing required params:', { sessionId: !!sessionId, agentId: !!agentId, roomId: !!roomId });
+      return;
+    }
+
+    console.log('[useChat] Setting up SSE stream for streaming responses', { agentId, roomId, sessionId });
+    
+    const { isAuthenticated: currentAuth, supabaseUserId: currentSbId } = authStateRef.current;
+    
+    const cleanup = createSSEStream(agentId, roomId, {
+      onChunk: (data: SSEChunkEvent) => {
+        // Handle streaming chunks
+        if (data.chunk) {
+          setStreamingMessage((prev) => {
+            const updated = prev + data.chunk;
+            streamingMessageRef.current = updated;
+            return updated;
+          });
+        }
+      },
+      onMessage: (data: SSEMessageEvent) => {
+        // Handle complete message (alternative to chunk-based streaming)
+        if (data.text) {
+          const agentMessage: Message = {
+            id: data.messageId || `agent-${Date.now()}-${Math.random()}`,
+            text: data.text,
+            userId: data.agentId,
+            agentId: data.agentId,
+            sessionId: data.sessionId || sessionId,
+            createdAt: data.timestamp || new Date().toISOString(),
+            role: 'agent',
+          };
+
+          setMessages((prev) => {
+            const lastMessage = prev[prev.length - 1];
+            // Replace streaming message if it exists
+            if (lastMessage?.role === 'agent' && lastMessage.id.startsWith('agent-')) {
+              return [...prev.slice(0, -1), agentMessage];
+            }
+            return [...prev, agentMessage];
+          });
+
+          const { isAuthenticated: auth, supabaseUserId: sbId } = authStateRef.current;
+          saveMessage(agentMessage, sbId, auth);
+          setStreamingMessage('');
+          streamingMessageRef.current = '';
+        }
+      },
+      onError: (error) => {
+        console.error('[useChat] SSE error:', error);
+        setSseConnected(false); // Mark as disconnected on error
+        
+        // If endpoint doesn't exist (404), log a helpful message but don't show error to user
+        if (error.code === 'ENDPOINT_NOT_FOUND') {
+          console.warn('[useChat] SSE endpoint not available - falling back to REST API polling');
+          // SSE is optional - REST API polling will handle message delivery
+        }
+        // Don't set error state - SSE failures are non-critical, REST polling will handle it
+      },
+      onDone: () => {
+        // Stream complete - finalize any pending streaming message
+        const currentStreaming = streamingMessageRef.current;
+        if (currentStreaming) {
+          const agentMessage: Message = {
+            id: `agent-${Date.now()}-${Math.random()}`,
+            text: currentStreaming,
+            userId: agentId,
+            agentId,
+            sessionId: sessionId || '',
+            createdAt: new Date().toISOString(),
+            role: 'agent',
+          };
+
+          setMessages((prev) => {
+            const lastMessage = prev[prev.length - 1];
+            if (lastMessage?.role === 'agent' && lastMessage.id.startsWith('agent-')) {
+              return [...prev.slice(0, -1), agentMessage];
+            }
+            return [...prev, agentMessage];
+          });
+
+          const { isAuthenticated: auth, supabaseUserId: sbId } = authStateRef.current;
+          saveMessage(agentMessage, sbId, auth);
+          setStreamingMessage('');
+          streamingMessageRef.current = '';
+        }
+      },
+      onOpen: () => {
+        console.log('[useChat] ✅ SSE stream opened - using SSE for real-time streaming');
+        setSseConnected(true); // Mark as connected
+      },
+      onClose: () => {
+        console.log('[useChat] SSE stream closed');
+        setSseConnected(false); // Mark as disconnected
+      },
+    });
+
+    return cleanup;
+  }, [sessionId, agentId, roomId]);
+
+  // Update UI with streaming message chunks (debounced to avoid too many re-renders)
+  useEffect(() => {
+    if (!streamingMessage) return;
+
+    // Create/update streaming message in UI
+    const agentMessage: Message = {
+      id: `agent-streaming-${sessionId}`, // Use consistent ID for streaming message
+      text: streamingMessage,
+      userId: agentId,
+      agentId,
+      sessionId: sessionId || '',
+      createdAt: new Date().toISOString(),
+      role: 'agent',
     };
 
-    socket.onMessage(handler);
-  }, [socket, sessionId]);
-
-  useEffect(() => {
-    if (streamingMessage && !socket.isTyping) {
-      const agentMessage: Message = {
-        id: `agent-${Date.now()}-${Math.random()}`,
-        text: streamingMessage,
-        userId: agentId,
-        agentId,
-        sessionId: sessionId || '',
-        createdAt: new Date().toISOString(),
-        role: 'agent',
-      };
-
-      setMessages((prev) => {
-        const lastMessage = prev[prev.length - 1];
-        if (lastMessage?.role === 'agent' && lastMessage.id.startsWith('agent-')) {
-          return [...prev.slice(0, -1), agentMessage];
-        }
-        return [...prev, agentMessage];
-      });
-
-      saveMessage(agentMessage, supabaseUserId, isAuthenticated);
-      setStreamingMessage('');
-    }
-  }, [streamingMessage, socket.isTyping, agentId, sessionId, supabaseUserId, isAuthenticated]);
+    setMessages((prev) => {
+      const lastMessage = prev[prev.length - 1];
+      // Replace existing streaming message or add new one
+      if (lastMessage?.id === `agent-streaming-${sessionId}`) {
+        return [...prev.slice(0, -1), agentMessage];
+      }
+      return [...prev, agentMessage];
+    });
+  }, [streamingMessage, agentId, sessionId]);
 
   // Load messages - called once per session
   useEffect(() => {
@@ -327,6 +455,7 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
       setMessages([]);
       setStreamingMessage('');
       setError(null);
+      setSseConnected(false); // Reset SSE connection state on session change
       loadedSessionRef.current = null;
       isLoadingRef.current = false;
     }
@@ -345,13 +474,18 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
     isNewSessionRef.current = true;
   }, [sessionId]);
 
+  // Format knowledge context for prompt injection
+  const knowledgeContextPrompt = knowledgeContext.length > 0
+    ? formatSearchResultsForContext(knowledgeContext)
+    : '';
+
   return {
     messages,
     sendMessage,
     isSending: sendMessageMutation.isPending,
-    isConnected: socket.isConnected,
-    isTyping: socket.isTyping,
-    status: socket.status,
+    isConnected: sseConnected, // Track actual SSE connection status
+    isTyping: !!streamingMessage, // Typing indicator based on streaming state
+    status: streamingMessage ? 'processing' : 'idle',
     error,
     // Memory context
     memoryContext,
@@ -365,5 +499,9 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
       updateSummary,
       summarizeConversation,
     },
+    // Knowledge context from session articles
+    knowledgeContext,
+    knowledgeContextPrompt,
+    hasKnowledge,
   };
 }

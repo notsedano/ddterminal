@@ -105,7 +105,9 @@ function buildSportradarPath(type: 'schedule' | 'injuries' | 'game' | 'live', op
     case 'schedule':
       return `/nba/${ACCESS_LEVEL}/${API_VERSION}/en/games/${y}/${m}/${d}/schedule.json`;
     case 'injuries':
-      return `/nba/${ACCESS_LEVEL}/${API_VERSION}/en/league/${y}/${m}/${d}/daily_injuries.json`;
+      // Use league-wide injuries endpoint (all active injuries across all teams)
+      // Not the daily_injuries endpoint which only shows injuries for games on that day
+      return `/nba/${ACCESS_LEVEL}/${API_VERSION}/en/league/injuries.json`;
     case 'game':
       return `/nba/${ACCESS_LEVEL}/${API_VERSION}/en/games/${gameId}/summary.json`;
     case 'live':
@@ -186,22 +188,17 @@ export async function getNBAMatchPanelGames(date?: Date): Promise<MatchPanelGame
 }
 
 /**
- * Fetch daily injuries report
+ * Fetch league-wide injuries report (all active injuries across all teams)
+ * This returns ALL current injuries, not just for games on a specific day
  */
-export async function getNBAInjuries(date?: Date): Promise<NBADailyInjuries> {
-  const year = date?.getFullYear();
-  const month = date ? date.getMonth() + 1 : undefined;
-  const day = date?.getDate();
-
+export async function getNBAInjuries(): Promise<NBADailyInjuries> {
   if (IS_DEV) {
-    const path = buildSportradarPath('injuries', { year, month, day });
+    // Use league injuries endpoint - no date parameters needed
+    const path = buildSportradarPath('injuries');
     return fetchFromApi<NBADailyInjuries>(path);
   } else {
-    const params: Record<string, string | number> = {};
-    if (year) params.year = year;
-    if (month) params.month = month;
-    if (day) params.day = day;
-    return fetchFromApi<NBADailyInjuries>('/injuries', params);
+    // Vercel serverless proxy - also uses league injuries endpoint now
+    return fetchFromApi<NBADailyInjuries>('/injuries');
   }
 }
 

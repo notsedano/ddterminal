@@ -46,6 +46,44 @@ interface MemoryDB extends DBSchema {
 
 let dbPromise: Promise<IDBPDatabase<MemoryDB>> | null = null;
 
+// Flag to track if storage is disabled due to quota error
+let storageDisabled = false;
+let quotaErrorLogged = false;
+
+/**
+ * Check if an error is a storage-related error (quota, disk space, internal errors)
+ */
+function isStorageError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const errorName = error.name.toLowerCase();
+    const errorMessage = error.message.toLowerCase();
+    
+    return (
+      errorName === 'quotaexceedederror' ||
+      errorName === 'unknownerror' ||
+      errorMessage.includes('quotaexceeded') ||
+      errorMessage.includes('full disk') ||
+      errorMessage.includes('storage quota') ||
+      errorMessage.includes('internal error') ||
+      errorMessage.includes('file_error_no_space') ||
+      errorMessage.includes('no space') ||
+      errorMessage.includes('disk full')
+    );
+  }
+  return false;
+}
+
+/**
+ * Log storage error once to avoid spamming console
+ */
+function logStorageError(context: string): void {
+  if (!quotaErrorLogged) {
+    console.warn(`[MemoryStorage] Storage error (${context}). Clear browser data to fix.`);
+    quotaErrorLogged = true;
+  }
+  storageDisabled = true;
+}
+
 function getDB(): Promise<IDBPDatabase<MemoryDB>> {
   if (!dbPromise) {
     dbPromise = openDB<MemoryDB>('eliza-memory', 1, {
@@ -71,6 +109,13 @@ function getDB(): Promise<IDBPDatabase<MemoryDB>> {
         profileStore.createIndex('by-userId', 'userId');
         profileStore.createIndex('by-agentId', 'agentId');
       },
+    }).catch((error) => {
+      if (isStorageError(error)) {
+        logStorageError('database open');
+        // Return a dummy promise that resolves to prevent crashes
+        return Promise.resolve(null as any);
+      }
+      throw error;
     });
   }
   return dbPromise;
@@ -81,17 +126,37 @@ function getDB(): Promise<IDBPDatabase<MemoryDB>> {
 // ============================================================================
 
 export async function saveLocalMemoryFragment(fragment: MemoryFragment): Promise<void> {
-  const db = await getDB();
-  await db.put('memory_fragments', fragment);
+  if (storageDisabled) return;
+  
+  try {
+    const db = await getDB();
+    await db.put('memory_fragments', fragment);
+      } catch (error) {
+        if (isStorageError(error)) {
+          logStorageError('saveLocalMemoryFragment');
+        } else {
+          throw error;
+        }
+      }
 }
 
 export async function saveLocalMemoryFragments(fragments: MemoryFragment[]): Promise<void> {
-  const db = await getDB();
-  const tx = db.transaction('memory_fragments', 'readwrite');
-  await Promise.all([
-    ...fragments.map((f) => tx.store.put(f)),
-    tx.done,
-  ]);
+  if (storageDisabled) return;
+  
+  try {
+    const db = await getDB();
+    const tx = db.transaction('memory_fragments', 'readwrite');
+    await Promise.all([
+      ...fragments.map((f) => tx.store.put(f)),
+      tx.done,
+    ]);
+      } catch (error) {
+        if (isStorageError(error)) {
+          logStorageError('saveLocalMemoryFragments');
+        } else {
+          throw error;
+        }
+      }
 }
 
 export async function getLocalMemoryFragments(
@@ -104,44 +169,54 @@ export async function getLocalMemoryFragments(
     sessionId?: string;
   } = {}
 ): Promise<MemoryFragment[]> {
-  const db = await getDB();
-  const tx = db.transaction('memory_fragments', 'readonly');
-  const index = tx.store.index('by-userId');
+  if (storageDisabled) return [];
   
-  let fragments = await index.getAll(userId);
-  
-  // Filter by agentId
-  fragments = fragments.filter((f) => f.agentId === agentId);
-  
-  // Filter by session if specified
-  if (options.sessionId) {
-    fragments = fragments.filter((f) => f.sessionId === options.sessionId);
-  }
-  
-  // Filter by types
-  if (options.types && options.types.length > 0) {
-    fragments = fragments.filter((f) => options.types!.includes(f.memoryType));
-  }
-  
-  // Filter by importance
-  if (options.minImportance !== undefined) {
-    fragments = fragments.filter((f) => f.importance >= options.minImportance!);
-  }
-  
-  // Filter out expired
-  const now = new Date().toISOString();
-  fragments = fragments.filter((f) => !f.expiresAt || f.expiresAt > now);
-  
-  // Sort by importance descending
-  fragments.sort((a, b) => b.importance - a.importance);
-  
-  // Limit results
-  if (options.limit) {
-    fragments = fragments.slice(0, options.limit);
-  }
-  
-  await tx.done;
-  return fragments;
+  try {
+    const db = await getDB();
+    const tx = db.transaction('memory_fragments', 'readonly');
+    const index = tx.store.index('by-userId');
+    
+    let fragments = await index.getAll(userId);
+    
+    // Filter by agentId
+    fragments = fragments.filter((f) => f.agentId === agentId);
+    
+    // Filter by session if specified
+    if (options.sessionId) {
+      fragments = fragments.filter((f) => f.sessionId === options.sessionId);
+    }
+    
+    // Filter by types
+    if (options.types && options.types.length > 0) {
+      fragments = fragments.filter((f) => options.types!.includes(f.memoryType));
+    }
+    
+    // Filter by importance
+    if (options.minImportance !== undefined) {
+      fragments = fragments.filter((f) => f.importance >= options.minImportance!);
+    }
+    
+    // Filter out expired
+    const now = new Date().toISOString();
+    fragments = fragments.filter((f) => !f.expiresAt || f.expiresAt > now);
+    
+    // Sort by importance descending
+    fragments.sort((a, b) => b.importance - a.importance);
+    
+    // Limit results
+    if (options.limit) {
+      fragments = fragments.slice(0, options.limit);
+    }
+    
+    await tx.done;
+    return fragments;
+      } catch (error) {
+        if (isStorageError(error)) {
+          logStorageError('getLocalMemoryFragments');
+          return [];
+        }
+        throw error;
+      }
 }
 
 export async function deleteLocalMemoryFragment(id: string): Promise<void> {
@@ -174,8 +249,18 @@ export async function cleanupExpiredLocalMemories(userId: string): Promise<numbe
 // ============================================================================
 
 export async function saveLocalConversationSummary(summary: ConversationSummary): Promise<void> {
-  const db = await getDB();
-  await db.put('conversation_summaries', summary);
+  if (storageDisabled) return;
+  
+  try {
+    const db = await getDB();
+    await db.put('conversation_summaries', summary);
+      } catch (error) {
+        if (isStorageError(error)) {
+          logStorageError('saveLocalConversationSummary');
+        } else {
+          throw error;
+        }
+      }
 }
 
 export async function getLocalConversationSummary(sessionId: string): Promise<ConversationSummary | undefined> {
@@ -234,8 +319,18 @@ export async function deleteLocalConversationSummary(sessionId: string): Promise
 // ============================================================================
 
 export async function saveLocalUserContextProfile(profile: UserContextProfile): Promise<void> {
-  const db = await getDB();
-  await db.put('user_context_profiles', profile);
+  if (storageDisabled) return;
+  
+  try {
+    const db = await getDB();
+    await db.put('user_context_profiles', profile);
+      } catch (error) {
+        if (isStorageError(error)) {
+          logStorageError('saveLocalUserContextProfile');
+        } else {
+          throw error;
+        }
+      }
 }
 
 export async function getLocalUserContextProfile(

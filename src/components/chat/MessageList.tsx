@@ -70,7 +70,7 @@ export function MessageList({ messages, isTyping }: MessageListProps) {
           src={ddThumbnail} 
           alt="Daredevil" 
           className={cn(
-            "w-[120px] h-[120px] sm:w-[160px] sm:h-[160px] md:w-[200px] md:h-[200px] lg:w-[240px] lg:h-[240px] object-contain border-2 border-white transition-opacity duration-300 ease-in-out",
+            "w-[120px] h-[120px] sm:w-[160px] sm:h-[160px] md:w-[200px] md:h-[200px] lg:w-[240px] lg:h-[240px] object-contain transition-opacity duration-300 ease-in-out",
             isImageVisible ? "opacity-100" : "opacity-0"
           )}
         />

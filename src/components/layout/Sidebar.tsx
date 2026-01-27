@@ -1,13 +1,17 @@
-import { Plus, Trash2, Puzzle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Trash2, Brain } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useSessions, useDeleteSession, useCreateSession } from '@/hooks/useSession';
-import { PluginPanel } from '@/components/plugins/PluginPanel';
+import { useAuth } from '@/hooks/useAuth';
+import { KnowledgeModal } from '@/components/knowledge/KnowledgeModal';
 import { format } from 'date-fns';
 import { cn } from '@/utils/cn';
 import { useState } from 'react';
 import type { Session, SessionMetadata } from '@/types';
 import { LiveTeamStats } from '@/components/sidebar/LiveTeamStats';
+
+// Feature flag: Knowledge feature temporarily disabled
+const KNOWLEDGE_FEATURE_ENABLED = false;
 
 export interface SidebarProps {
   currentSessionId: string | null;
@@ -44,7 +48,8 @@ export function Sidebar({ currentSessionId, onSessionSelect, agentId }: SidebarP
   const { data: sessions = [], isLoading } = useSessions();
   const deleteSession = useDeleteSession();
   const createSession = useCreateSession();
-  const [showPlugins, setShowPlugins] = useState(false);
+  const { supabaseUserId } = useAuth();
+  const [showKnowledge, setShowKnowledge] = useState(false);
   
   // Delete confirmation state
   const [deleteConfirm, setDeleteConfirm] = useState<{
@@ -59,6 +64,24 @@ export function Sidebar({ currentSessionId, onSessionSelect, agentId }: SidebarP
       {
         onSuccess: (session) => {
           onSessionSelect(session.sessionId);
+        },
+        onError: (error) => {
+          console.error('[Sidebar] Failed to create session:', error);
+          // Check if it's a storage error
+          const isStorageError = error instanceof Error && (
+            error.name === 'QuotaExceededError' ||
+            error.name === 'UnknownError' ||
+            error.message.includes('Internal error') ||
+            error.message.includes('storage') ||
+            error.message.includes('quota') ||
+            error.message.includes('no space')
+          );
+          
+          if (isStorageError) {
+            alert('Unable to create session: Browser storage is full. Please clear your browser data for this site and try again.');
+          } else {
+            alert('Failed to create session. Please try again.');
+          }
         },
       }
     );
@@ -116,22 +139,16 @@ export function Sidebar({ currentSessionId, onSessionSelect, agentId }: SidebarP
           variant="outline"
           className="w-full"
           size="sm"
-          onClick={() => setShowPlugins(!showPlugins)}
+          onClick={() => KNOWLEDGE_FEATURE_ENABLED && setShowKnowledge(true)}
+          disabled={!KNOWLEDGE_FEATURE_ENABLED}
+          title={KNOWLEDGE_FEATURE_ENABLED 
+            ? "Add article knowledge for enhanced predictions" 
+            : "Knowledge feature temporarily disabled"}
         >
-          <Puzzle className="h-4 w-4 mr-2" />
-          Plugins
-          {showPlugins ? (
-            <ChevronUp className="h-4 w-4 ml-auto" />
-          ) : (
-            <ChevronDown className="h-4 w-4 ml-auto" />
-          )}
+          <Brain className="h-4 w-4 mr-2" />
+          Knowledge
         </Button>
       </div>
-      {showPlugins && (
-        <div className="border-b border-border p-4 max-h-[300px] overflow-auto">
-          <PluginPanel agentId={agentId} />
-        </div>
-      )}
       <div className="flex-1 overflow-auto">
         {isLoading ? (
           <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>
@@ -188,6 +205,15 @@ export function Sidebar({ currentSessionId, onSessionSelect, agentId }: SidebarP
         isLoading={deleteSession.isPending}
       />
 
+      {/* Knowledge Modal */}
+      {KNOWLEDGE_FEATURE_ENABLED && (
+        <KnowledgeModal
+          isOpen={showKnowledge}
+          onClose={() => setShowKnowledge(false)}
+          sessionId={currentSessionId}
+          userId={supabaseUserId}
+        />
+      )}
     </aside>
   );
 }

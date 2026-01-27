@@ -257,9 +257,16 @@ export function useDeleteSession() {
       }
 
       // ALWAYS delete from local storage (IndexedDB) - this is critical
-      console.log('[useDeleteSession] Deleting from IndexedDB');
-      await deleteStoredSession(sessionId);
-      console.log('[useDeleteSession] IndexedDB delete successful');
+      // Wrap in try-catch to ensure UI updates even if IndexedDB fails
+      try {
+        console.log('[useDeleteSession] Deleting from IndexedDB');
+        await deleteStoredSession(sessionId);
+        console.log('[useDeleteSession] IndexedDB delete successful');
+      } catch (error) {
+        // Log but don't throw - we still want to update UI cache even if IndexedDB fails
+        console.warn('[useDeleteSession] IndexedDB delete failed (continuing):', error);
+        // This is non-critical - the session will be removed from UI cache anyway
+      }
 
       // Delete from Supabase if authenticated
       if (isAuthenticated && supabaseUserId && isSupabaseConfigured()) {

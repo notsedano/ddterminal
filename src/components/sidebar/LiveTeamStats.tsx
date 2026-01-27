@@ -9,6 +9,7 @@ import { useState, useMemo } from 'react';
 import { cn } from '@/utils/cn';
 import { useMatchPanel } from '@/hooks/useMatchPanel';
 import { useGameStats, type SortField, type SortDirection } from '@/hooks/useGameStats';
+import { useNBAInjuries } from '@/hooks/useNBAInjuries';
 import { PlayerStatsRow } from './PlayerStatsRow';
 import { ChevronDown, ChevronUp, TrendingUp, Activity, BarChart3 } from 'lucide-react';
 
@@ -17,6 +18,12 @@ export function LiveTeamStats() {
   const game = currentMatch?.game ?? null;
   const gameId = game?.id ?? null;
   const isLive = game?.isLive ?? false;
+
+  // Fetch injury data for this game (shared with injury report)
+  const { getInjuriesForGame } = useNBAInjuries();
+  const { home: homeInjuries, away: awayInjuries } = game 
+    ? getInjuriesForGame(game)
+    : { home: null, away: null };
 
   const {
     homePlayers,
@@ -31,6 +38,8 @@ export function LiveTeamStats() {
     gameId,
     game,
     autoRefresh: isLive,
+    homeInjuries,
+    awayInjuries,
   });
 
   // Team selection

@@ -78,3 +78,25 @@ export {
   // Realtime subscriptions
   subscribeToMemoryUpdates,
 } from './memory';
+
+// Session Knowledge operations
+export {
+  // Source operations
+  getSessionKnowledgeSources,
+  getSessionKnowledgeSourceCount,
+  isUrlAlreadyAdded,
+  addKnowledgeSource,
+  processKnowledgeSource,
+  deleteKnowledgeSource,
+  // Search operations
+  searchSessionKnowledge,
+  getSessionKnowledgeContext,
+  sessionHasKnowledge,
+  // Context formatting
+  formatSearchResultsForContext,
+  formatFullKnowledgeForContext,
+  // Rate limit status
+  getKnowledgeRateLimitStatus,
+  // Constants
+  MAX_SOURCES_PER_SESSION,
+} from './knowledge';

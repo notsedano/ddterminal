@@ -13,9 +13,8 @@ interface CacheEntry {
 const injuriesCache: Map<string, CacheEntry> = new Map();
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
-function getCacheKey(year: number, month: number, day: number): string {
-  return `injuries-${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-}
+// Cache key for league-wide injuries (not date-specific)
+const LEAGUE_INJURIES_CACHE_KEY = 'league-injuries';
 
 function isValidCache(entry: CacheEntry | undefined): entry is CacheEntry {
   if (!entry) return false;
@@ -51,28 +50,8 @@ export default async function handler(
     });
   }
 
-  // Get date from query params or use today
-  const { year, month, day } = req.query;
-  
-  let targetDate: Date;
-  if (year && month && day) {
-    targetDate = new Date(
-      parseInt(year as string),
-      parseInt(month as string) - 1,
-      parseInt(day as string)
-    );
-  } else {
-    // Use Eastern Time for NBA (injuries are reported in ET)
-    targetDate = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  }
-
-  const y = targetDate.getFullYear();
-  const m = targetDate.getMonth() + 1;
-  const d = targetDate.getDate();
-
-  // Check cache first
-  const cacheKey = getCacheKey(y, m, d);
-  const cachedEntry = injuriesCache.get(cacheKey);
+  // Check cache first - use league-wide cache key
+  const cachedEntry = injuriesCache.get(LEAGUE_INJURIES_CACHE_KEY);
   
   if (isValidCache(cachedEntry)) {
     // CDN cache for 10 minutes, stale-while-revalidate for 15 minutes
@@ -85,8 +64,9 @@ export default async function handler(
     });
   }
 
-  // Build Sportradar API URL for daily injuries
-  const apiUrl = `${SPORTRADAR_BASE_URL}/${SPORTRADAR_ACCESS_LEVEL}/v8/en/league/${y}/${m.toString().padStart(2, '0')}/${d.toString().padStart(2, '0')}/daily_injuries.json?api_key=${SPORTRADAR_API_KEY}`;
+  // Build Sportradar API URL for LEAGUE injuries (all active injuries across all teams)
+  // This endpoint returns all current injuries, not just for games on a specific day
+  const apiUrl = `${SPORTRADAR_BASE_URL}/${SPORTRADAR_ACCESS_LEVEL}/v8/en/league/injuries.json?api_key=${SPORTRADAR_API_KEY}`;
 
   const response = await fetch(apiUrl, {
     headers: {
@@ -111,8 +91,8 @@ export default async function handler(
 
   const data = await response.json();
 
-  // Cache the successful response
-  injuriesCache.set(cacheKey, {
+  // Cache the successful response using league-wide cache key
+  injuriesCache.set(LEAGUE_INJURIES_CACHE_KEY, {
     data,
     timestamp: Date.now(),
   });

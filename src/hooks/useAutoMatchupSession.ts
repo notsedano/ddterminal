@@ -118,7 +118,28 @@ export function useAutoMatchupSession(options: UseAutoMatchupSessionOptions = {}
         }
       })
       .catch((error) => {
-        console.error('Failed to auto-create matchup session:', error);
+        // Check if it's a storage error - these are non-critical storage errors
+        const isStorageError = error instanceof Error && (
+          error.name === 'QuotaExceededError' ||
+          error.name === 'UnknownError' ||
+          error.message.includes('QuotaExceeded') ||
+          error.message.includes('full disk') ||
+          error.message.includes('storage quota') ||
+          error.message.includes('Internal error') ||
+          error.message.includes('FILE_ERROR_NO_SPACE') ||
+          error.message.includes('no space')
+        );
+        
+        if (isStorageError) {
+          // Log once but don't spam console - this is a known issue with full storage
+          console.warn('Failed to auto-create matchup session due to storage error. Clear browser data to fix.');
+        } else {
+          console.error('Failed to auto-create matchup session:', error);
+        }
+        
+        // Mark as processed to prevent infinite retry loop
+        lastProcessedGameIdRef.current = gameId;
+        hasCheckedInitialLoadRef.current = true;
       })
       .finally(() => {
         isCreatingRef.current = false;

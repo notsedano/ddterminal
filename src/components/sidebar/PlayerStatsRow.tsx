@@ -7,7 +7,7 @@
 import { memo } from 'react';
 import { cn } from '@/utils/cn';
 import type { PlayerGameStats } from '@/hooks/useGameStats';
-import { Flame } from 'lucide-react';
+import { Flame, AlertTriangle } from 'lucide-react';
 
 interface PlayerStatsRowProps {
   player: PlayerGameStats;
@@ -32,6 +32,39 @@ export const PlayerStatsRow = memo(function PlayerStatsRow({
     (player.fieldGoalPct > 50 && player.fieldGoalsAttempted >= 5) ||
     (player.threePointPct > 40 && player.threePointsAttempted >= 3)
   );
+
+  // Injury status styling
+  const getInjuryColor = () => {
+    if (!player.isInjured || !player.injuryStatus) return '';
+    switch (player.injuryStatus) {
+      case 'Out':
+      case 'Doubtful':
+        return 'text-red-400';
+      case 'Questionable':
+      case 'Day-To-Day':
+        return 'text-yellow-400';
+      case 'Probable':
+        return 'text-green-400';
+      default:
+        return 'text-muted-foreground';
+    }
+  };
+
+  const getInjuryBg = () => {
+    if (!player.isInjured || !player.injuryStatus) return '';
+    switch (player.injuryStatus) {
+      case 'Out':
+      case 'Doubtful':
+        return 'bg-red-500/10';
+      case 'Questionable':
+      case 'Day-To-Day':
+        return 'bg-yellow-500/10';
+      case 'Probable':
+        return 'bg-green-500/10';
+      default:
+        return '';
+    }
+  };
 
   const formatPercentage = (pct: number, attempted: number): string => {
     // Show dash if no attempts
@@ -77,6 +110,7 @@ export const PlayerStatsRow = memo(function PlayerStatsRow({
         'flex items-center gap-2 px-2 py-1.5 rounded text-xs',
         'hover:bg-muted/30 transition-colors',
         player.onCourt && !isSeasonAverage && 'bg-primary/10',
+        player.isInjured && getInjuryBg(),
         className
       )}
     >
@@ -95,12 +129,26 @@ export const PlayerStatsRow = memo(function PlayerStatsRow({
           className={cn(
             'truncate font-medium',
             getBettingImpactColor(),
-            player.onCourt && !isSeasonAverage && 'text-foreground'
+            player.onCourt && !isSeasonAverage && 'text-foreground',
+            player.isInjured && getInjuryColor()
           )}
-          title={player.name}
+          title={player.isInjured && player.injuryStatus 
+            ? `${player.name} - ${player.injuryStatus}` 
+            : player.name
+          }
         >
           {formatPlayerName(player.name)}
         </span>
+        {/* Injury Indicator */}
+        {player.isInjured && player.injuryStatus && (
+          <AlertTriangle 
+            className={cn(
+              'h-3 w-3 flex-shrink-0',
+              getInjuryColor()
+            )}
+            title={`Injury Status: ${player.injuryStatus}`}
+          />
+        )}
       </div>
 
       {/* Stats */}

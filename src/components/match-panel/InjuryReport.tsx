@@ -124,63 +124,137 @@ interface TeamInjuriesProps {
 }
 
 const TeamInjuries = memo(function TeamInjuries({ team }: TeamInjuriesProps) {
-  const criticalInjuries = team.players.filter(p => 
-    p.injuries.some(i => i.status === 'Out' || i.status === 'Doubtful')
-  );
-  const questionableInjuries = team.players.filter(p => 
-    p.injuries.some(i => i.status === 'Questionable' || i.status === 'Day-To-Day')
-  );
-  const probableInjuries = team.players.filter(p => 
-    p.injuries.some(i => i.status === 'Probable')
-  );
+  // Show all players, sorted by severity (Out/Doubtful first, then Questionable, then Probable)
+  const sortedPlayers = [...team.players].sort((a, b) => {
+    const getSeverityOrder = (player: NBAInjuredPlayer): number => {
+      const status = player.injuries[0]?.status || '';
+      if (status === 'Out' || status === 'Doubtful' || status.includes('Out')) return 0;
+      if (status === 'Questionable' || status === 'Day-To-Day') return 1;
+      if (status === 'Probable') return 2;
+      return 3;
+    };
+    return getSeverityOrder(a) - getSeverityOrder(b);
+  });
 
   return (
     <div className="flex flex-col gap-2 p-2 rounded-lg bg-muted/30">
-      <div className="flex items-center gap-2 mb-1">
+      <div className="flex items-center gap-2 mb-2">
         <span className="text-xs font-semibold">{team.market} {team.name}</span>
         <span className="text-[10px] text-muted-foreground">
           ({team.players.length} {team.players.length === 1 ? 'player' : 'players'})
         </span>
       </div>
 
-      {/* Critical Injuries (Out/Doubtful) */}
-      {criticalInjuries.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          {criticalInjuries.map(player => (
-            <PlayerInjury
-              key={player.id}
-              player={player}
-              severity="critical"
-            />
-          ))}
-        </div>
-      )}
+      {/* Table Format - Show all players */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-[10px]">
+          <thead>
+            <tr className="border-b border-border/50">
+              <th className="text-left py-1.5 px-2 font-medium text-muted-foreground">Player</th>
+              <th className="text-left py-1.5 px-2 font-medium text-muted-foreground">Pos</th>
+              <th className="text-left py-1.5 px-2 font-medium text-muted-foreground">Status</th>
+              <th className="text-left py-1.5 px-2 font-medium text-muted-foreground">Injury</th>
+              <th className="text-left py-1.5 px-2 font-medium text-muted-foreground">Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedPlayers.map((player) => {
+              const primaryInjury = player.injuries[0];
+              if (!primaryInjury) return null;
+              
+              const status = primaryInjury.status || 'Unknown';
+              
+              // Extract injury type from desc or comment
+              // Try to get a clean injury name (e.g., "Hamstring", "Quad", "Shoulder")
+              let injuryType = '-';
+              if (primaryInjury.desc) {
+                // Try to extract the injury type from description
+                // Common patterns: "Hamstring", "Injury Management", "Foot", "Back", etc.
+                const desc = primaryInjury.desc;
+                // Look for common injury keywords
+                const injuryKeywords = ['Hamstring', 'Quad', 'Knee', 'Ankle', 'Foot', 'Back', 'Shoulder', 'Thoracic', 'Wrist', 'Hand', 'Groin', 'Calf', 'Achilles', 'Hip', 'Elbow', 'Neck', 'Head', 'Concussion'];
+                const foundKeyword = injuryKeywords.find(keyword => 
+                  desc.toLowerCase().includes(keyword.toLowerCase())
+                );
+                if (foundKeyword) {
+                  injuryType = foundKeyword;
+                } else {
+                  // Fallback: take first word or phrase before comma/dash
+                  injuryType = desc.split(/[,\-–—]/)[0].trim();
+                }
+              } else if (primaryInjury.comment) {
+                injuryType = primaryInjury.comment.split(/[,\-–—]/)[0].trim();
+              }
+              
+              // Format date as "Jan 26" or "Jan 14"
+              let updatedDate = '-';
+              try {
+                if (primaryInjury.update_date) {
+                  const date = new Date(primaryInjury.update_date);
+                  updatedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                } else if (primaryInjury.start_date) {
+                  const date = new Date(primaryInjury.start_date);
+                  updatedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                }
+              } catch (e) {
+                // Invalid date, keep as '-'
+              }
 
-      {/* Questionable Injuries */}
-      {questionableInjuries.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          {questionableInjuries.map(player => (
-            <PlayerInjury
-              key={player.id}
-              player={player}
-              severity="questionable"
-            />
-          ))}
-        </div>
-      )}
+              // Determine severity for styling - handle "Out For Season" and other variations
+              const statusLower = status.toLowerCase();
+              const isCritical = statusLower.includes('out') || status === 'Doubtful';
+              const isQuestionable = status === 'Questionable' || status === 'Day-To-Day';
+              const isProbable = status === 'Probable';
 
-      {/* Probable Injuries */}
-      {probableInjuries.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          {probableInjuries.map(player => (
-            <PlayerInjury
-              key={player.id}
-              player={player}
-              severity="probable"
-            />
-          ))}
-        </div>
-      )}
+              return (
+                <tr 
+                  key={player.id}
+                  className={cn(
+                    'border-b border-border/30 hover:bg-muted/20 transition-colors',
+                    isCritical && 'bg-red-500/5',
+                    isQuestionable && 'bg-yellow-500/5',
+                    isProbable && 'bg-green-500/5'
+                  )}
+                >
+                  <td className="py-1.5 px-2">
+                    <span className="font-medium">
+                      #{player.jersey_number || '?'} {player.full_name}
+                    </span>
+                  </td>
+                  <td className="py-1.5 px-2 text-muted-foreground">
+                    {player.position || player.primary_position || '-'}
+                  </td>
+                  <td className="py-1.5 px-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className={cn(
+                        'w-1.5 h-1.5 rounded-full flex-shrink-0',
+                        isCritical && 'bg-red-500',
+                        isQuestionable && 'bg-yellow-500',
+                        isProbable && 'bg-green-500',
+                        !isCritical && !isQuestionable && !isProbable && 'bg-muted-foreground'
+                      )} />
+                      <span className={cn(
+                        'font-medium',
+                        isCritical && 'text-red-400',
+                        isQuestionable && 'text-yellow-400',
+                        isProbable && 'text-green-400'
+                      )}>
+                        {status}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="py-1.5 px-2 text-muted-foreground">
+                    {injuryType}
+                  </td>
+                  <td className="py-1.5 px-2 text-muted-foreground">
+                    {updatedDate}
+                  </td>
+                </tr>
+              );
+            }).filter(Boolean)}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 });

@@ -14,6 +14,12 @@ const CACHE_KEY = 'persistedQueries';
 // Maximum age for persisted queries (24 hours)
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
+// Flag to track if we've already logged a storage error (avoid spam)
+let storageErrorLogged = false;
+
+// Flag to track if persistence is disabled due to storage error
+let persistenceDisabled = false;
+
 interface QueryCacheDB {
   queryCache: {
     key: string;
@@ -22,6 +28,29 @@ interface QueryCacheDB {
 }
 
 let dbPromise: Promise<IDBPDatabase<QueryCacheDB>> | null = null;
+
+/**
+ * Check if an error is a storage-related error (quota, disk space, internal errors)
+ */
+function isStorageError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const errorName = error.name.toLowerCase();
+    const errorMessage = error.message.toLowerCase();
+    
+    return (
+      errorName === 'quotaexceedederror' ||
+      errorName === 'unknownerror' ||
+      errorMessage.includes('quotaexceeded') ||
+      errorMessage.includes('full disk') ||
+      errorMessage.includes('storage quota') ||
+      errorMessage.includes('internal error') ||
+      errorMessage.includes('file_error_no_space') ||
+      errorMessage.includes('no space') ||
+      errorMessage.includes('disk full')
+    );
+  }
+  return false;
+}
 
 /**
  * Get or create the IndexedDB database
@@ -44,6 +73,19 @@ function getDB(): Promise<IDBPDatabase<QueryCacheDB>> {
         console.warn('[QueryPersister] Database connection terminated unexpectedly');
         dbPromise = null;
       },
+    }).catch((error) => {
+      // Handle storage errors during database opening
+      if (isStorageError(error)) {
+        if (!storageErrorLogged) {
+          console.warn('[QueryPersister] Storage error detected. Query persistence disabled.');
+          console.info('[QueryPersister] To fix: Clear browser data or site storage for this domain.');
+          storageErrorLogged = true;
+        }
+        persistenceDisabled = true;
+        // Don't throw - return a dummy promise that resolves to prevent crashes
+        return Promise.resolve(null as any);
+      }
+      throw error;
     });
   }
   return dbPromise;
@@ -52,34 +94,91 @@ function getDB(): Promise<IDBPDatabase<QueryCacheDB>> {
 /**
  * Create an IndexedDB-based persister for React Query
  * This allows query cache to survive page refreshes
+ * Gracefully handles storage quota errors by disabling persistence
  */
 export function createIDBPersister(): Persister {
   return {
     persistClient: async (client: PersistedClient) => {
-      const db = await getDB();
-      await db.put(STORE_NAME, client, CACHE_KEY);
+      // Skip persistence if disabled due to quota error
+      if (persistenceDisabled) {
+        return;
+      }
+
+      try {
+        const db = await getDB();
+        if (!db) return; // DB failed to open due to storage error
+        await db.put(STORE_NAME, client, CACHE_KEY);
+      } catch (error) {
+        if (isStorageError(error)) {
+          // Disable persistence to prevent error loops
+          persistenceDisabled = true;
+          if (!storageErrorLogged) {
+            console.warn('[QueryPersister] Storage error during persist. Disabling query cache persistence.');
+            console.info('[QueryPersister] To fix: Clear browser data or site storage for this domain.');
+            storageErrorLogged = true;
+          }
+          
+          // Try to clear the old cache to free up space (silently fail)
+          try {
+            const db = await getDB();
+            if (db) await db.clear(STORE_NAME);
+          } catch {
+            // Ignore errors during cleanup
+          }
+        } else {
+          // Log other errors but don't throw to prevent app crashes
+          console.error('[QueryPersister] Error persisting client:', error);
+        }
+      }
     },
 
     restoreClient: async (): Promise<PersistedClient | undefined> => {
-      const db = await getDB();
-      const cached = await db.get(STORE_NAME, CACHE_KEY);
-      
-      if (!cached) {
+      // Skip restore if persistence is disabled
+      if (persistenceDisabled) {
         return undefined;
       }
 
-      // Check if the cache is too old
-      if (cached.timestamp && Date.now() - cached.timestamp > MAX_AGE_MS) {
-        await db.delete(STORE_NAME, CACHE_KEY);
+      try {
+        const db = await getDB();
+        if (!db) return undefined; // DB failed to open due to storage error
+        const cached = await db.get(STORE_NAME, CACHE_KEY);
+        
+        if (!cached) {
+          return undefined;
+        }
+
+        // Check if the cache is too old
+        if (cached.timestamp && Date.now() - cached.timestamp > MAX_AGE_MS) {
+          await db.delete(STORE_NAME, CACHE_KEY);
+          return undefined;
+        }
+
+        return cached;
+      } catch (error) {
+        if (isStorageError(error)) {
+          persistenceDisabled = true;
+          if (!storageErrorLogged) {
+            console.warn('[QueryPersister] Storage error during restore. Disabling query cache persistence.');
+            storageErrorLogged = true;
+          }
+        } else {
+          console.error('[QueryPersister] Error restoring client:', error);
+        }
         return undefined;
       }
-
-      return cached;
     },
 
     removeClient: async () => {
-      const db = await getDB();
-      await db.delete(STORE_NAME, CACHE_KEY);
+      try {
+        const db = await getDB();
+        if (!db) return; // DB failed to open due to storage error
+        await db.delete(STORE_NAME, CACHE_KEY);
+      } catch (error) {
+        // Ignore all errors during removal - not critical
+        if (!isStorageError(error)) {
+          console.error('[QueryPersister] Error removing client:', error);
+        }
+      }
     },
   };
 }

@@ -123,7 +123,7 @@ export interface NBADailySchedule {
 // Player Injury Information
 export interface NBAInjury {
   id: string;
-  status: 'Out' | 'Doubtful' | 'Questionable' | 'Probable' | 'Day-To-Day';
+  status: 'Out' | 'Doubtful' | 'Questionable' | 'Probable' | 'Day-To-Day' | string; // Allow string for variations like "Out For Season"
   desc?: string;
   start_date?: string;
   update_date?: string;
