@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MessageBubble } from './MessageBubble';
 import { TypingIndicator } from './TypingIndicator';
 import { ScrollArea } from '@/components/ui/ScrollArea';
@@ -14,14 +14,51 @@ export interface MessageListProps {
 
 export function MessageList({ messages, isTyping }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const [isImageVisible, setIsImageVisible] = useState(true);
 
   const scrollToBottom = () => {
     // Scroll to bottom where newest messages appear
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  // Check if scroll is at bottom (within threshold)
+  const isAtBottom = (element: HTMLElement, threshold = 100) => {
+    const { scrollTop, scrollHeight, clientHeight } = element;
+    return scrollHeight - scrollTop - clientHeight < threshold;
+  };
+
+  // Handle scroll events to show/hide image
+  useEffect(() => {
+    const scrollElement = scrollAreaRef.current;
+    if (!scrollElement) return;
+
+    const handleScroll = () => {
+      const atBottom = isAtBottom(scrollElement);
+      setIsImageVisible(atBottom);
+    };
+
+    scrollElement.addEventListener('scroll', handleScroll);
+    
+    // Check initial state
+    handleScroll();
+
+    return () => {
+      scrollElement.removeEventListener('scroll', handleScroll);
+    };
+  }, []);
+
+  // Show image when new messages arrive or when typing
   useEffect(() => {
     scrollToBottom();
+    // Small delay to ensure scroll has completed before checking position
+    const timer = setTimeout(() => {
+      const scrollElement = scrollAreaRef.current;
+      if (scrollElement && isAtBottom(scrollElement)) {
+        setIsImageVisible(true);
+      }
+    }, 100);
+    return () => clearTimeout(timer);
   }, [messages, isTyping]);
 
   return (
@@ -32,10 +69,13 @@ export function MessageList({ messages, isTyping }: MessageListProps) {
         <img 
           src={ddThumbnail} 
           alt="Daredevil" 
-          className="w-[120px] h-[120px] sm:w-[160px] sm:h-[160px] md:w-[200px] md:h-[200px] lg:w-[240px] lg:h-[240px] object-contain border-2 border-white"
+          className={cn(
+            "w-[120px] h-[120px] sm:w-[160px] sm:h-[160px] md:w-[200px] md:h-[200px] lg:w-[240px] lg:h-[240px] object-contain border-2 border-white transition-opacity duration-300 ease-in-out",
+            isImageVisible ? "opacity-100" : "opacity-0"
+          )}
         />
       </div>
-      <ScrollArea className={cn("relative z-10 flex-1 p-4 h-full")}>
+      <ScrollArea ref={scrollAreaRef} className={cn("relative z-10 flex-1 p-4 h-full")}>
         <div className="flex flex-col gap-2 min-h-full justify-end">
           {messages.map((message) => (
             <MessageBubble key={message.id} message={message} />
