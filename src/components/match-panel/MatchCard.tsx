@@ -12,7 +12,6 @@ import { useGameMarketData, usePolymarketForGame } from '@/hooks/usePolymarketNB
 import { useNBAInjuries } from '@/hooks/useNBAInjuries';
 import { useMatchHistory } from '@/hooks/useMatchHistory';
 import { useBettingIndicators } from '@/hooks/useBettingIndicators';
-import { useOptionalMatchupSession } from '@/contexts/MatchupSessionContext';
 import type { ParsedGameMarket } from '@/services/api/polymarket';
 import { MatchStatusBadge } from './MatchStatusBadge';
 import { MarketDetails } from './MarketDetails';
@@ -22,8 +21,7 @@ import { InjuryReport } from './InjuryReport';
 import { StreakPanel } from './StreakIndicator';
 import { BettingSignalsPanel } from './BettingSignals';
 import { TeamLogo } from '@/components/TeamLogo';
-import { Button } from '@/components/ui/Button';
-import { Clock, Calendar, TrendingUp, Wifi, Activity, ArrowUpDown, Target, DollarSign, ChevronDown, ChevronUp, BarChart3, LineChart as LineChartIcon, Flame, Zap, MessageCircle } from 'lucide-react';
+import { Clock, Calendar, TrendingUp, Wifi, Activity, ArrowUpDown, Target, DollarSign, ChevronDown, ChevronUp, BarChart3, LineChart as LineChartIcon, Flame, Zap } from 'lucide-react';
 import { PriceLineChart, OutcomeComparisonChart } from '@/components/charts';
 import { HudChartWrapper } from '@/components/ui/HudChartWrapper';
 import { format } from 'date-fns';
@@ -73,10 +71,6 @@ export const MatchCard = memo(function MatchCard({ game, market: marketProp, cla
   // Track selected market type
   const [selectedMarketType, setSelectedMarketType] = useState<SportsMarketType>('MONEYLINE');
   
-  // Matchup chat context (optional - may not be available in all contexts)
-  const matchupSession = useOptionalMatchupSession();
-  const hasExistingChat = matchupSession?.hasSessionForGame(game.id) ?? false;
-
   // Determine which markets are available
   const availableMarketTypes = useMemo(() => {
     return {
@@ -117,37 +111,13 @@ export const MatchCard = memo(function MatchCard({ game, market: marketProp, cla
   const hasMarketData = gameMarkets.hasMarkets;
   const isLoadingMarkets = gameMarkets.isLoading;
 
-  // Handle starting a chat for this matchup
-  const handleStartChat = async () => {
-    if (matchupSession) {
-      await matchupSession.startMatchupChat(game);
-    }
-  };
-
   return (
     <div className={cn('flex flex-col gap-4', className)}>
-      {/* Status Badge and Chat Button */}
+      {/* Status Badge */}
       <div className="flex items-center justify-between">
         <div className="flex-1" />
         <MatchStatusBadge status={game.status} />
-        <div className="flex-1 flex justify-end">
-          {matchupSession && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleStartChat}
-              disabled={matchupSession.isCreating}
-              className={cn(
-                'h-7 px-2 text-xs gap-1',
-                hasExistingChat && 'text-primary'
-              )}
-              title={hasExistingChat ? 'Continue conversation about this matchup' : 'Start a conversation about this matchup'}
-            >
-              <MessageCircle className="h-3.5 w-3.5" />
-              {hasExistingChat ? 'Chat' : 'Ask DD'}
-            </Button>
-          )}
-        </div>
+        <div className="flex-1" />
       </div>
 
       {/* Time Until Game (for upcoming games) */}
