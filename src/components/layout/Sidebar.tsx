@@ -149,7 +149,7 @@ export function Sidebar({ currentSessionId, onSessionSelect, agentId }: SidebarP
   return (
     <aside className="w-64 hud-panel border-r bg-background flex flex-col relative z-10">
       <div className="p-4 border-b border-border space-y-2 relative z-10">
-        <Button onClick={handleNewSession} className="w-full" size="sm">
+        <Button onClick={handleNewSession} className="w-full text-white" size="sm">
           <Plus className="h-4 w-4 mr-2" />
           New Session
         </Button>

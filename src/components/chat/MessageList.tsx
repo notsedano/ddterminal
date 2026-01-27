@@ -25,8 +25,8 @@ export function MessageList({ messages, isTyping }: MessageListProps) {
   }, [messages, isTyping]);
 
   return (
-    <div className="relative flex-1 h-full overflow-hidden">
-      <HackerBackground />
+    <div className="relative flex-1 h-full overflow-hidden" style={{ backgroundColor: '#1500FF' }}>
+      <HackerBackground color="#1500FF" />
       {/* Thumbnail in bottom left - fixed position above message input */}
       <div className="absolute bottom-0 left-0 z-20 pointer-events-none pb-2 pl-2 sm:pb-3 sm:pl-3 md:pb-4 md:pl-4">
         <img 

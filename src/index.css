@@ -41,7 +41,7 @@
   --card-foreground: 222.2 84% 4.9%;
   --popover: 0 0% 100%;
   --popover-foreground: 222.2 84% 4.9%;
-  --primary: 222.2 47.4% 11.2%;
+  --primary: 245 100% 50%;
   --primary-foreground: 210 40% 98%;
   --secondary: 210 40% 96.1%;
   --secondary-foreground: 222.2 47.4% 11.2%;
@@ -53,7 +53,7 @@
   --destructive-foreground: 210 40% 98%;
   --border: 214.3 31.8% 91.4%;
   --input: 214.3 31.8% 91.4%;
-  --ring: 222.2 84% 4.9%;
+  --ring: 245 100% 50%;
   --radius: 0.5rem;
 }
 
@@ -64,7 +64,7 @@
   --card-foreground: 217 91% 85%;
   --popover: 0 0% 6%;
   --popover-foreground: 217 91% 85%;
-  --primary: 217 91% 60%;
+  --primary: 245 100% 50%;
   --primary-foreground: 0 0% 4%;
   --secondary: 217 30% 20%;
   --secondary-foreground: 217 91% 85%;
@@ -76,33 +76,33 @@
   --destructive-foreground: 210 40% 98%;
   --border: 217 91% 50%;
   --input: 217 30% 15%;
-  --ring: 217 91% 60%;
+  --ring: 245 100% 50%;
   
   /* HUD Color Variables - Blue Theme */
-  --hud-blue: 217 91% 60%;
-  --hud-blue-bright: 217 91% 70%;
-  --hud-blue-dim: 217 91% 50%;
-  --hud-blue-glow: 217 91% 60%;
+  --hud-blue: 245 100% 50%;
+  --hud-blue-bright: 245 100% 60%;
+  --hud-blue-dim: 245 100% 40%;
+  --hud-blue-glow: 245 100% 50%;
   --hud-bg: 0 0% 4%;
   --hud-bg-panel: 0 0% 6%;
   --hud-text: 217 91% 85%;
   --hud-text-dim: 217 30% 65%;
-  --hud-border: 217 91% 50%;
-  --hud-border-glow: 217 91% 60%;
+  --hud-border: 245 100% 50%;
+  --hud-border-glow: 245 100% 60%;
 }
 
 :root {
   /* HUD Color Variables - Light Mode Adapted */
-  --hud-blue: 217 70% 45%;
-  --hud-blue-bright: 217 70% 55%;
-  --hud-blue-dim: 217 70% 35%;
-  --hud-blue-glow: 217 70% 45%;
+  --hud-blue: 245 100% 50%;
+  --hud-blue-bright: 245 100% 60%;
+  --hud-blue-dim: 245 100% 40%;
+  --hud-blue-glow: 245 100% 50%;
   --hud-bg: 0 0% 98%;
   --hud-bg-panel: 0 0% 96%;
   --hud-text: 217 70% 25%;
   --hud-text-dim: 217 30% 45%;
-  --hud-border: 217 70% 60%;
-  --hud-border-glow: 217 70% 50%;
+  --hud-border: 245 100% 50%;
+  --hud-border-glow: 245 100% 60%;
 }
 
 /* Base styles */
@@ -687,8 +687,8 @@ body {
   --shiny-cta-bg: #000000;
   --shiny-cta-bg-subtle: #1a1818;
   --shiny-cta-fg: #ffffff;
-  --shiny-cta-highlight: blue;
-  --shiny-cta-highlight-subtle: #8484ff;
+  --shiny-cta-highlight: #1500FF;
+  --shiny-cta-highlight-subtle: #1500FF;
   --animation: gradient-angle linear infinite;
   --duration: 3s;
   --shadow-size: 2px;

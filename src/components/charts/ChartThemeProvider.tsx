@@ -11,7 +11,7 @@ import { useEffect, useState, type ReactNode } from 'react';
  */
 export const chartColors = {
   // Primary series colors - Blue theme
-  primary: '#60a5fa', // blue-400 (brighter for HUD)
+  primary: '#1500FF', // primary blue
   secondary: '#3b82f6', // blue-500
   tertiary: '#93c5fd', // blue-300
   quaternary: '#2563eb', // blue-600
@@ -21,7 +21,7 @@ export const chartColors = {
   success: '#22c55e', // green-500
   danger: '#ef4444', // red-500
   warning: '#f59e0b', // amber-500
-  info: '#60a5fa', // blue-400 (HUD blue)
+  info: '#1500FF', // primary blue (HUD blue)
   
   // Orderbook colors
   bid: '#22c55e', // green-500
@@ -35,7 +35,7 @@ export const chartColors = {
   
   // Series palette for multi-series charts - Blue-focused
   series: [
-    '#60a5fa', // blue-400 (primary HUD blue)
+    '#1500FF', // primary blue (primary HUD blue)
     '#3b82f6', // blue-500
     '#22c55e', // green-500
     '#93c5fd', // blue-300
