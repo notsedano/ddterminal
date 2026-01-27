@@ -13,6 +13,14 @@ const apiClient: AxiosInstance = axios.create({
   timeout: 30000,
 });
 
+// Custom error class to preserve error code information
+export class SessionNotFoundError extends Error {
+  constructor(message: string, public readonly code: string = 'SESSION_NOT_FOUND') {
+    super(message);
+    this.name = 'SessionNotFoundError';
+  }
+}
+
 apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
@@ -20,18 +28,34 @@ apiClient.interceptors.response.use(
       const { status, data, config } = error.response;
       const errorData = data as { error?: { message?: string; code?: string } };
       const errorMessage = errorData?.error?.message || error.message || 'An error occurred';
+      const errorCode = errorData?.error?.code;
       const requestUrl = config?.url || 'unknown endpoint';
       
       // Log specific error types for debugging
-      const statusMessages: Record<number, string> = {
-        401: 'Unauthorized - authentication may be required',
-        403: 'Forbidden - insufficient permissions',
-        404: `Not found (404) - ${requestUrl}`,
-        429: 'Rate limited - too many requests',
-      };
+      // Skip verbose logging for expected 404s/400s on sessions (they expire naturally)
+      const isSessionsEndpoint = requestUrl.includes('/messaging/sessions');
       
-      if (statusMessages[status]) {
-        console.error(statusMessages[status]);
+      // Handle SESSION_NOT_FOUND errors (can be 400 or 404)
+      if (isSessionsEndpoint && (errorCode === 'SESSION_NOT_FOUND' || status === 404)) {
+        // Don't log - this is expected when sessions expire, handled by caller
+        // Throw a SessionNotFoundError to make it easier to detect
+        throw new SessionNotFoundError(errorMessage, errorCode || 'SESSION_NOT_FOUND');
+      }
+      
+      if (status === 401) {
+        console.error('Unauthorized - authentication may be required');
+      } else if (status === 403) {
+        console.error('Forbidden - insufficient permissions');
+      } else if (status === 404) {
+        console.error(`Not found (404) - ${requestUrl}`);
+      } else if (status === 400 && isSessionsEndpoint) {
+        // 400 errors on sessions endpoint might be SESSION_NOT_FOUND
+        if (errorCode === 'SESSION_NOT_FOUND') {
+          throw new SessionNotFoundError(errorMessage, errorCode);
+        }
+        console.error(`Bad request (400) - ${requestUrl}`);
+      } else if (status === 429) {
+        console.error('Rate limited - too many requests');
       } else if (status >= 500) {
         console.error(`Server error (${status}) - backend may be unavailable`);
       }

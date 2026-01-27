@@ -4,3 +4,6 @@ export * from './message';
 export * from './system';
 export * from './sports';
 export * from './polymarket';
+export * from './auth';
+export * from './database';
+export * from './memory';

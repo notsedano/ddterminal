@@ -75,6 +75,8 @@ export default async function handler(
   const cachedEntry = scheduleCache.get(cacheKey);
   
   if (isValidCache(cachedEntry)) {
+    // CDN cache for 2 minutes, stale-while-revalidate for 5 minutes
+    res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=300');
     return res.status(200).json({
       success: true,
       data: cachedEntry.data,
@@ -115,6 +117,8 @@ export default async function handler(
     timestamp: Date.now(),
   });
 
+  // CDN cache for 2 minutes, stale-while-revalidate for 5 minutes
+  res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=300');
   return res.status(200).json({
     success: true,
     data,

@@ -71,6 +71,8 @@ export default async function handler(
   if (!skipCache) {
     const cachedEntry = cache.get(cacheKey);
     if (isValidCache(cachedEntry)) {
+      // CDN cache for 15 seconds for price data
+      res.setHeader('Cache-Control', 's-maxage=15, stale-while-revalidate=30');
       return res.status(200).json(cachedEntry.data);
     }
   }
@@ -107,6 +109,11 @@ export default async function handler(
       data,
       timestamp: Date.now(),
     });
+    // CDN cache for 15 seconds for price data
+    res.setHeader('Cache-Control', 's-maxage=15, stale-while-revalidate=30');
+  } else {
+    // No CDN cache for orderbooks - they change too rapidly
+    res.setHeader('Cache-Control', 'no-store');
   }
 
   return res.status(200).json(data);

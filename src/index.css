@@ -652,6 +652,11 @@ body {
   filter: blur(50px);
 }
 
+/* Remove glow from MarketButton while keeping animated border */
+.rainbow-border-no-glow::after {
+  display: none;
+}
+
 /* Shiny Button Styles */
 
 @property --gradient-angle {

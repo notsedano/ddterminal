@@ -75,22 +75,31 @@ export function usePolymarketNBA(options: UsePolymarketNBAOptions = {}): UsePoly
 
   // Find market for a specific game
   const getMarketForGame = useCallback((game: MatchPanelGame): PolymarketSportsMarket | null => {
-    const homeTeam = `${game.home.team.market} ${game.home.team.name}`.toLowerCase();
-    const awayTeam = `${game.away.team.market} ${game.away.team.name}`.toLowerCase();
-    const homeAlias = game.home.team.alias.toLowerCase();
-    const awayAlias = game.away.team.alias.toLowerCase();
-    const homeName = game.home.team.name.toLowerCase();
-    const awayName = game.away.team.name.toLowerCase();
+    // Safely extract team info with fallbacks
+    const homeTeamData = game.home?.team;
+    const awayTeamData = game.away?.team;
+    
+    if (!homeTeamData || !awayTeamData) return null;
+    
+    const homeTeam = `${homeTeamData.market || ''} ${homeTeamData.name || ''}`.toLowerCase().trim();
+    const awayTeam = `${awayTeamData.market || ''} ${awayTeamData.name || ''}`.toLowerCase().trim();
+    const homeAlias = (homeTeamData.alias || '').toLowerCase();
+    const awayAlias = (awayTeamData.alias || '').toLowerCase();
+    const homeName = (homeTeamData.name || '').toLowerCase();
+    const awayName = (awayTeamData.name || '').toLowerCase();
 
     for (const market of markets) {
+      // Skip markets without eventTitle
+      if (!market?.eventTitle) continue;
+      
       const title = market.eventTitle.toLowerCase();
       
-      const hasHome = title.includes(homeTeam) || 
-                      title.includes(homeName) ||
-                      title.includes(homeAlias);
-      const hasAway = title.includes(awayTeam) || 
-                      title.includes(awayName) ||
-                      title.includes(awayAlias);
+      const hasHome = (homeTeam && title.includes(homeTeam)) || 
+                      (homeName && title.includes(homeName)) ||
+                      (homeAlias && title.includes(homeAlias));
+      const hasAway = (awayTeam && title.includes(awayTeam)) || 
+                      (awayName && title.includes(awayName)) ||
+                      (awayAlias && title.includes(awayAlias));
 
       if (hasHome && hasAway) {
         return market;

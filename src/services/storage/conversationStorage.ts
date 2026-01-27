@@ -83,9 +83,64 @@ export async function getMessages(sessionId: string): Promise<Message[]> {
 }
 
 export async function clearAllData(): Promise<void> {
+  // Close existing connection
+  if (dbPromise) {
+    const db = await dbPromise;
+    db.close();
+    dbPromise = null;
+  }
+  
+  // Delete the conversations database
+  await deleteDatabase('eliza-conversations');
+  
+  // Also delete the memory database
+  await deleteDatabase('eliza-memory');
+  
+  console.log('[ConversationStorage] Cleared all local data');
+}
+
+/**
+ * Helper to delete an IndexedDB database
+ */
+async function deleteDatabase(name: string): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const request = indexedDB.deleteDatabase(name);
+    request.onsuccess = () => {
+      console.log(`[ConversationStorage] Database '${name}' deleted successfully`);
+      resolve();
+    };
+    request.onerror = () => {
+      console.warn(`[ConversationStorage] Failed to delete database '${name}':`, request.error);
+      resolve(); // Continue anyway
+    };
+    request.onblocked = () => {
+      console.warn(`[ConversationStorage] Database '${name}' deletion blocked`);
+      resolve(); // Continue anyway
+    };
+  });
+}
+
+/**
+ * Debug function to list all sessions in IndexedDB
+ */
+export async function debugListAllSessions(): Promise<{ userId: string; sessions: Session[] }[]> {
   const db = await getDB();
-  const tx = db.transaction(['sessions', 'messages'], 'readwrite');
-  await tx.objectStore('sessions').clear();
-  await tx.objectStore('messages').clear();
-  await tx.done;
+  const allSessions = await db.getAll('sessions');
+  
+  // Group by userId
+  const grouped = allSessions.reduce((acc, session) => {
+    if (!acc[session.userId]) {
+      acc[session.userId] = [];
+    }
+    acc[session.userId].push(session);
+    return acc;
+  }, {} as Record<string, Session[]>);
+  
+  const result = Object.entries(grouped).map(([userId, sessions]) => ({
+    userId,
+    sessions,
+  }));
+  
+  console.log('[ConversationStorage] All sessions in IndexedDB:', result);
+  return result;
 }

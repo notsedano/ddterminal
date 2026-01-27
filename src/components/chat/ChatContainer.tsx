@@ -9,9 +9,10 @@ export interface ChatContainerProps {
   roomId: string;
   className?: string;
   onSessionInvalid?: (sessionId: string) => void;
+  showMessageInput?: boolean;
 }
 
-export function ChatContainer({ sessionId, agentId, roomId, className, onSessionInvalid }: ChatContainerProps) {
+export function ChatContainer({ sessionId, agentId, roomId, className, onSessionInvalid, showMessageInput = true }: ChatContainerProps) {
   const { messages, sendMessage, isSending, isConnected, isTyping, error } = useChat({
     sessionId,
     agentId,
@@ -20,15 +21,17 @@ export function ChatContainer({ sessionId, agentId, roomId, className, onSession
   });
 
   return (
-    <div className={cn('flex flex-col h-full', className)}>
+    <div className={cn('flex flex-col h-full relative', className)}>
       <div className="flex-1 overflow-hidden">
         <MessageList messages={messages} isTyping={isTyping} />
       </div>
-      <MessageInput
-        onSend={sendMessage}
-        disabled={isSending}
-        placeholder={isSending ? 'Sending...' : 'Type a message...'}
-      />
+      {showMessageInput && (
+        <MessageInput
+          onSend={sendMessage}
+          disabled={isSending}
+          placeholder={isSending ? 'Sending...' : 'Type a message...'}
+        />
+      )}
       {error && (
         <div className="px-4 py-2 bg-red-500/10 text-red-600 dark:text-red-400 text-sm text-center">
           {error}

@@ -17,6 +17,7 @@ export {
 export {
   PriceLineChart,
   MultiOutcomePriceChart,
+  OutcomeComparisonChart,
   default as PriceLineChartDefault,
 } from './PriceLineChart';
 

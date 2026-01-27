@@ -1,0 +1,201 @@
+# Frontend Webapp Integration Guide
+
+## Project Overview
+
+Build a standalone React webapp that integrates with an elizaOS backend for the **"test-dd-local"** agent. This is a custom client (not using `@elizaos/client`) deployed on Vercel with separate dev/prod environments.
+
+## Backend Deployment
+
+### Production Backend URL
+
+**Live Backend**: https://3a6615a6-aeris-agent.containers.elizacloud.ai/
+
+### Backend Deployment Instructions
+
+The backend is deployed using elizaOS Cloud. For deployment details, see:
+
+- **Deployment Guide**: See `MANUAL_DEPLOYMENT.md` in the project root
+- **elizaOS Cloud**: https://www.elizacloud.ai
+- **Deployment Script**: `deploy-manual.ps1`
+
+#### Quick Deployment Steps
+
+1. **Get API Key**:ershell
+   elizaos login
+   # Or set manually:
+   $env:ELIZAOS_API_KEY = "your-api-key-here"
+
+
+Deploy:
+   .\deploy-manual.ps1
+Access Backend:
+Production: https://3a6615a6-aeris-agent.containers.elizacloud.ai/
+API Base: https://3a6615a6-aeris-agent.containers.elizacloud.ai/api
+Target Agent Configuration
+Agent Name: test-dd (test-dd-local)
+Character: Agent Daredevil - Web3 gaming superhero
+Plugins:
+@elizaos/plugin-sql (core)
+@elizaos/plugin-openai / @elizaos/plugin-google-genai (embeddings)
+@elizaos/plugin-knowledge (RAG file uploads with UI)
+@elizaos/plugin-sportradar (NBA sports data)
+Additional LLM plugins (Anthropic, OpenRouter, etc.)
+Knowledge Path: ./docs/test-dd
+System Prompt: Roleplay as Agent Daredevil delivering Web3 gaming, esports, crypto insights, and NBA sports data
+Technical Stack
+Core Technologies
+React 18+ with TypeScript
+Vite for build tooling
+Tailwind CSS 4.x for styling
+React Query (@tanstack/react-query) for server state
+Custom elizaOS API client (no @elizaos/client dependency)
+State Management
+React Query: Server state, API caching, background refetching
+Hybrid Conversation State:
+Client-side: LocalStorage/IndexedDB for message persistence
+Server-side: Fetch conversation history from elizaOS backend
+Sync: Load from server on mount, persist locally, sync periodically
+Core Features
+1. Chat Interface
+Message input with auto-resize, Enter to send
+Message display (user/agent with distinct styling)
+Streaming support for real-time responses
+Markdown rendering for agent responses
+Typing indicators
+Auto-scroll to latest message
+Message actions (copy, delete, regenerate)
+2. Plugin-Specific UI
+Knowledge Plugin
+File upload interface (drag-and-drop)
+Upload progress tracking
+Document list with metadata
+Document management (delete, view details)
+RAG status indicator
+Sportradar Plugin
+NBA data display (live scores, standings, player stats)
+Interactive elements (click to query agent)
+Real-time updates for live games
+Plugin Panel System
+Dynamic panel registration
+Tabbed/sidebar navigation
+Plugin-specific routing
+3. Real-Time Updates
+WebSocket/SSE connection to elizaOS backend
+Message streaming (token-by-token)
+Reconnection logic with exponential backoff
+Connection status indicator
+Event handling (typing, processing, completed)
+4. Message History & Management
+Conversation persistence (LocalStorage/IndexedDB)
+Load conversation history on app start
+Sync with server conversation history
+Start new conversation
+Load/delete/search conversations
+Export conversations (JSON/PDF)
+Context management across messages
+Design Specifications
+Theme & Styling
+Dark Mode: Default theme
+Light Mode: Optional toggle (persist preference)
+Color Scheme: Tailwind dark mode utilities, WCAG AA contrast
+Typography: Readable fonts, responsive sizes
+Responsive Design
+Mobile-First: Design for mobile, enhance for desktop
+Breakpoints: Mobile (<640px), Tablet (640-1024px), Desktop (>1024px)
+Touch Interactions: Large targets (min 44x44px), swipe gestures
+iOS/Android: Test on real devices, handle viewport/safe areas
+Accessibility (WCAG 2.1 AA)
+Full keyboard navigation
+Screen reader support (ARIA labels)
+Visible focus indicators
+Semantic HTML5 elements
+API Integration
+Environment Variables
+# DevelopmentVITE_API_BASE_URL=http://localhost:3000VITE_WS_URL=ws://localhost:3000/wsVITE_AGENT_ID=test-dd-local# ProductionVITE_API_BASE_URL=https://3a6615a6-aeris-agent.containers.elizacloud.aiVITE_WS_URL=wss://3a6615a6-aeris-agent.containers.elizacloud.ai/wsVITE_AGENT_ID=test-dd-local
+API Endpoints
+Send Message: POST /api/agent/{agentId}/messages
+Body: { text: string, conversationId?: string }
+Response: { messageId: string, conversationId: string }
+Get Messages: GET /api/agent/{agentId}/messages?conversationId={id}
+Response: { messages: Message[] }
+Get Conversations: GET /api/agent/{agentId}/conversations
+Response: { conversations: Conversation[] }
+Get Agent Info: GET /api/agent/{agentId}
+Response: { agent: AgentInfo }
+WebSocket/SSE: Real-time updates
+Events: message, typing, error, connected
+Error Handling
+Network errors: User-friendly messages, retry logic
+API errors: Handle 4xx/5xx appropriately
+Timeout handling: Show timeout, allow retry
+
+
+
+Rate limiting: Show message, disable input temporarily
+Project Structure
+src/├── components/│   ├── chat/│   │   ├── ChatContainer.tsx│   │   ├── MessageList.tsx│   │   ├── MessageBubble.tsx│   │   ├── MessageInput.tsx│   │   └── TypingIndicator.tsx│   ├── plugins/│   │   ├── KnowledgePluginUI.tsx│   │   ├── SportradarPluginUI.tsx│   │   └── PluginPanel.tsx│   ├── layout/│   │   ├── Header.tsx│   │   ├── Sidebar.tsx│   │   └── MainLayout.tsx│   └── ui/│       ├── Button.tsx│       ├── Input.tsx│       └── Modal.tsx├── hooks/│   ├── useChat.ts│   ├── useWebSocket.ts│   ├── useConversation.ts│   └── useAgent.ts├── services/│   ├── api/│   │   ├── client.ts│   │   ├── messages.ts│   │   ├── conversations.ts│   │   └── agent.ts│   └── storage/│       ├── conversationStorage.ts│       └── messageStorage.ts├── stores/│   └── conversationStore.ts├── types/│   ├── agent.ts│   ├── message.ts│   └── conversation.ts├── utils/│   ├── format.ts│   └── validation.ts└── App.tsx
+Deployment (Vercel)
+Vercel Configuration
+Framework Preset: Vite
+Build Command: npm run build or bun run build
+Output Directory: dist/frontend
+Environment Variables:
+VITE_API_BASE_URL (production API URL)
+VITE_AGENT_ID (if static)
+VITE_WS_URL (WebSocket URL)
+Development vs Production
+Development:
+API: http://localhost:3000
+WebSocket: ws://localhost:3000/ws
+Production:
+API: https://3a6615a6-aeris-agent.containers.elizacloud.ai
+WebSocket: wss://3a6615a6-aeris-agent.containers.elizacloud.ai/ws
+Implementation Phases
+Phase 1: Core Chat (MVP)
+Basic chat interface
+Message sending/receiving
+Message history display
+Local storage persistence
+Basic error handling
+Phase 2: Real-Time & Polish
+WebSocket/SSE integration
+Streaming responses
+Typing indicators
+Improved error handling
+Loading states
+Phase 3: Plugin Integration
+Knowledge plugin UI
+Sportradar plugin UI
+Plugin panel system
+Dynamic plugin registration
+Phase 4: Advanced Features
+Conversation management
+Search functionality
+Export conversations
+Advanced mobile optimizations
+Performance optimizations
+Testing Requirements
+Unit Tests: React components, hooks, utilities
+Integration Tests: API client, storage layer
+E2E Tests: Critical user flows (send message, receive response)
+Accessibility Tests: Screen reader compatibility, keyboard navigation
+Mobile Tests: Real device testing on iOS/Android
+Success Criteria
+✅ Users can send messages and receive agent responses
+✅ Real-time updates work (streaming or near-real-time)
+✅ Message history persists across sessions
+✅ Plugin-specific UIs render correctly
+✅ App works on iOS and Android browsers
+✅ Dark mode is default and fully functional
+✅ App is accessible (keyboard navigation, screen readers)
+✅ Deployed to Vercel with separate dev/prod environments
+Additional Notes
+Agent ID Resolution: The "test-dd-local" agent ID may need to be resolved dynamically. Check elizaOS server API for agent listing endpoint.
+CORS: Ensure elizaOS backend allows CORS from Vercel domain
+Authentication: If elizaOS requires auth, implement API key or token-based auth
+Rate Limiting: Implement client-side rate limiting to prevent abuse
+Offline Support: Consider service worker for offline message queuing
+Resources
+elizaOS Documentation: https://docs.elizaos.ai/
+elizaOS Cloud: https://www.elizacloud.ai
+Backend URL: https://3a6615a6-aeris-agent.containers.elizacloud.ai/

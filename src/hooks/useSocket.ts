@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import ElizaSocketClient, { type SocketEventHandlers } from '@/services/websocket/socketClient';
 import type { SocketMessageEvent } from '@/types';
 
-const DEBUG = false; // Set to true for WebSocket connection debugging
+// Set to true for detailed WebSocket connection debugging
+const DEBUG = false;
 
 function debugLog(context: string, message: string, data?: unknown): void {
   if (DEBUG) {
@@ -27,6 +28,7 @@ export function useSocket({ agentId, roomId, enabled = true }: UseSocketOptions)
   const [status, setStatus] = useState<'idle' | 'processing' | 'typing' | 'error'>('idle');
   const socketRef = useRef<ElizaSocketClient | null>(null);
   const isMountedRef = useRef(false);
+  const connectingRef = useRef(false); // Prevent double connections from StrictMode
   const messageHandlersRef = useRef<{
     onMessage?: (data: SocketMessageEvent) => void;
   }>({});
@@ -40,6 +42,7 @@ export function useSocket({ agentId, roomId, enabled = true }: UseSocketOptions)
 
   const disconnect = useCallback(() => {
     debugLog('disconnect', 'Disconnecting socket...');
+    connectingRef.current = false; // Reset connecting state
     if (socketRef.current) {
       socketRef.current.disconnect();
       socketRef.current = null;
@@ -51,6 +54,12 @@ export function useSocket({ agentId, roomId, enabled = true }: UseSocketOptions)
   }, []);
 
   const connect = useCallback(() => {
+    // Prevent duplicate connections (React StrictMode causes double renders)
+    if (connectingRef.current) {
+      debugLog('connect', 'Connection already in progress, skipping');
+      return;
+    }
+
     debugLog('connect', 'Checking connection conditions...', { 
       enabled, 
       wsUrl, 
@@ -59,7 +68,8 @@ export function useSocket({ agentId, roomId, enabled = true }: UseSocketOptions)
     });
 
     if (!enabled || !wsUrl) {
-      debugLog('connect', 'Skipping connection', { reason: !enabled ? 'disabled' : 'no URL' });
+      const reason = !enabled ? 'disabled' : 'no URL';
+      debugLog('connect', 'Skipping connection', { reason });
       return;
     }
 
@@ -68,25 +78,33 @@ export function useSocket({ agentId, roomId, enabled = true }: UseSocketOptions)
       return;
     }
 
+    // Mark as connecting to prevent duplicates
+    connectingRef.current = true;
+
+    console.log('[useSocket] Creating new connection:', { wsUrl, agentId, roomId });
     debugLog('connect', 'Creating new ElizaSocketClient...', { wsUrl, agentId, roomId });
     const socket = new ElizaSocketClient(wsUrl);
     socketRef.current = socket;
 
     const handlers: SocketEventHandlers = {
       onConnected: () => {
+        connectingRef.current = false; // Connection complete
         if (!isMountedRef.current) {
           debugLog('handler', 'onConnected ignored - component unmounted');
           return;
         }
+        console.log('[useSocket] ✅ Connected successfully!');
         debugLog('handler', '✅ onConnected callback fired');
         setIsConnected(true);
         setStatus('idle');
       },
       onDisconnected: () => {
+        connectingRef.current = false; // Allow reconnection
         if (!isMountedRef.current) {
           debugLog('handler', 'onDisconnected ignored - component unmounted');
           return;
         }
+        console.log('[useSocket] Disconnected');
         debugLog('handler', '⚠️ onDisconnected callback fired');
         setIsConnected(false);
         setStatus('idle');
@@ -123,15 +141,15 @@ export function useSocket({ agentId, roomId, enabled = true }: UseSocketOptions)
         }
       },
       onError: (error) => {
+        connectingRef.current = false; // Allow retry
         if (!isMountedRef.current) {
           debugLog('handler', 'onError ignored - component unmounted');
           return;
         }
         debugLog('handler', '❌ onError callback fired', { message: error.message });
-        // Only log if DEBUG is enabled to reduce console noise
-        // Connection errors are expected if server is down
-        if (DEBUG) {
-          console.error('Socket error:', error);
+        // Only log connection errors if they're not the expected WebSocket upgrade failures
+        if (!error.message?.includes('websocket')) {
+          console.warn('[useSocket] Connection error:', error.message);
         }
         setStatus('error');
       },

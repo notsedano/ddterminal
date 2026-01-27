@@ -3,7 +3,7 @@
  * Comprehensive market view with all data points for betting decisions
  */
 
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { cn } from '@/utils/cn';
 import type { PolymarketSportsMarket, SportsMarketType, ParsedOutcome } from '@/types';
 import { 
@@ -51,9 +51,9 @@ interface MarketDetailsProps {
 }
 
 /**
- * Full market details view
+ * Full market details view - memoized to prevent re-renders during polling
  */
-export function MarketDetails({ 
+export const MarketDetails = memo(function MarketDetails({ 
   market, 
   showOrderbook = true,
   showFullDetails = true,
@@ -266,7 +266,7 @@ export function MarketDetails({
       </div>
     </div>
   );
-}
+});
 
 /**
  * Outcome card with price and metrics
@@ -284,7 +284,10 @@ interface OutcomeCardProps {
   line?: number;
 }
 
-function OutcomeCard({ outcome, index, oddsFormat, metrics, marketType, line }: OutcomeCardProps) {
+/**
+ * OutcomeCard - memoized to prevent re-renders when odds haven't changed
+ */
+const OutcomeCard = memo(function OutcomeCard({ outcome, index, oddsFormat, metrics, marketType, line }: OutcomeCardProps) {
   const isFirst = index === 0;
   const colorClass = isFirst ? 'text-green-400' : 'text-red-400';
   const bgColorClass = isFirst ? 'bg-green-500/10' : 'bg-red-500/10';
@@ -351,38 +354,43 @@ function OutcomeCard({ outcome, index, oddsFormat, metrics, marketType, line }: 
       )}
     </div>
   );
-}
+});
 
 /**
- * Odds visualization bar
+ * Odds visualization bar - memoized for stable outcome data
+ * Always shows higher percentage (favorite) on the left in green
  */
-function OddsVisualization({ outcomes }: { outcomes: ParsedOutcome[] }) {
-  const yesPrice = outcomes[0]?.price ?? 0.5;
-  const noPrice = outcomes[1]?.price ?? 0.5;
+const OddsVisualization = memo(function OddsVisualization({ outcomes }: { outcomes: ParsedOutcome[] }) {
+  if (outcomes.length < 2) return null;
+  
+  // Sort to ensure favorite (higher %) is always on the left
+  const sorted = [...outcomes].sort((a, b) => b.price - a.price);
+  const favoritePrice = sorted[0]?.price ?? 0.5;
+  const underdogPrice = sorted[1]?.price ?? 0.5;
 
   return (
     <div className="space-y-1">
       <div className="flex justify-between text-[10px] text-muted-foreground">
-        <span>{outcomes[0]?.name}</span>
-        <span>{outcomes[1]?.name}</span>
+        <span>{sorted[0]?.name}</span>
+        <span>{sorted[1]?.name}</span>
       </div>
       <div className="w-full h-3 rounded-full overflow-hidden flex">
         <div
           className="h-full bg-green-500 transition-all duration-500"
-          style={{ width: `${yesPrice * 100}%` }}
+          style={{ width: `${favoritePrice * 100}%` }}
         />
         <div
           className="h-full bg-red-500 transition-all duration-500"
-          style={{ width: `${noPrice * 100}%` }}
+          style={{ width: `${underdogPrice * 100}%` }}
         />
       </div>
       <div className="flex justify-between text-xs font-medium">
-        <span className="text-green-400">{formatPriceAsPercentage(yesPrice)}</span>
-        <span className="text-red-400">{formatPriceAsPercentage(noPrice)}</span>
+        <span className="text-green-400">{formatPriceAsPercentage(favoritePrice)}</span>
+        <span className="text-red-400">{formatPriceAsPercentage(underdogPrice)}</span>
       </div>
     </div>
   );
-}
+});
 
 /**
  * Metric card
@@ -395,7 +403,10 @@ interface MetricCardProps {
   highlight?: boolean;
 }
 
-function MetricCard({ icon: Icon, label, value, subValue, highlight }: MetricCardProps) {
+/**
+ * MetricCard - memoized for stable metrics display
+ */
+const MetricCard = memo(function MetricCard({ icon: Icon, label, value, subValue, highlight }: MetricCardProps) {
   return (
     <div className={cn(
       'flex flex-col items-center p-2 rounded-lg',
@@ -412,7 +423,7 @@ function MetricCard({ icon: Icon, label, value, subValue, highlight }: MetricCar
       )}
     </div>
   );
-}
+});
 
 /**
  * Overround indicator
@@ -439,14 +450,14 @@ function OverroundIndicator({ overround }: { overround: number }) {
 
 
 /**
- * Compact market details for list views
+ * Compact market details for list views - memoized
  */
 interface CompactMarketDetailsProps {
   market: PolymarketSportsMarket;
   className?: string;
 }
 
-export function CompactMarketDetails({ market, className }: CompactMarketDetailsProps) {
+export const CompactMarketDetails = memo(function CompactMarketDetails({ market, className }: CompactMarketDetailsProps) {
   const outcomes = market.market.outcomes;
 
   return (
@@ -482,7 +493,7 @@ export function CompactMarketDetails({ market, className }: CompactMarketDetails
       </div>
     </div>
   );
-}
+});
 
 /**
  * Connection status indicator

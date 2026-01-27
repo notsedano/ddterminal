@@ -12,6 +12,7 @@ import { useGameMarketData, usePolymarketForGame } from '@/hooks/usePolymarketNB
 import { useNBAInjuries } from '@/hooks/useNBAInjuries';
 import { useMatchHistory } from '@/hooks/useMatchHistory';
 import { useBettingIndicators } from '@/hooks/useBettingIndicators';
+import { useOptionalMatchupSession } from '@/contexts/MatchupSessionContext';
 import type { ParsedGameMarket } from '@/services/api/polymarket';
 import { MatchStatusBadge } from './MatchStatusBadge';
 import { MarketDetails } from './MarketDetails';
@@ -21,10 +22,12 @@ import { InjuryReport } from './InjuryReport';
 import { StreakPanel } from './StreakIndicator';
 import { BettingSignalsPanel } from './BettingSignals';
 import { TeamLogo } from '@/components/TeamLogo';
-import { Clock, Calendar, ExternalLink, TrendingUp, Wifi, Activity, ArrowUpDown, Target, DollarSign, ChevronDown, ChevronUp, BarChart3, LineChart as LineChartIcon, Flame, Zap } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
+import { Clock, Calendar, TrendingUp, Wifi, Activity, ArrowUpDown, Target, DollarSign, ChevronDown, ChevronUp, BarChart3, LineChart as LineChartIcon, Flame, Zap, MessageCircle } from 'lucide-react';
 import { PriceLineChart, OutcomeComparisonChart } from '@/components/charts';
 import { HudChartWrapper } from '@/components/ui/HudChartWrapper';
 import { format } from 'date-fns';
+import { TEAM_ALIASES } from '@/data';
 
 interface MatchCardProps {
   game: MatchPanelGame;
@@ -69,6 +72,10 @@ export const MatchCard = memo(function MatchCard({ game, market: marketProp, cla
   
   // Track selected market type
   const [selectedMarketType, setSelectedMarketType] = useState<SportsMarketType>('MONEYLINE');
+  
+  // Matchup chat context (optional - may not be available in all contexts)
+  const matchupSession = useOptionalMatchupSession();
+  const hasExistingChat = matchupSession?.hasSessionForGame(game.id) ?? false;
 
   // Determine which markets are available
   const availableMarketTypes = useMemo(() => {
@@ -110,11 +117,37 @@ export const MatchCard = memo(function MatchCard({ game, market: marketProp, cla
   const hasMarketData = gameMarkets.hasMarkets;
   const isLoadingMarkets = gameMarkets.isLoading;
 
+  // Handle starting a chat for this matchup
+  const handleStartChat = async () => {
+    if (matchupSession) {
+      await matchupSession.startMatchupChat(game);
+    }
+  };
+
   return (
     <div className={cn('flex flex-col gap-4', className)}>
-      {/* Status Badge */}
-      <div className="flex justify-center">
+      {/* Status Badge and Chat Button */}
+      <div className="flex items-center justify-between">
+        <div className="flex-1" />
         <MatchStatusBadge status={game.status} />
+        <div className="flex-1 flex justify-end">
+          {matchupSession && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleStartChat}
+              disabled={matchupSession.isCreating}
+              className={cn(
+                'h-7 px-2 text-xs gap-1',
+                hasExistingChat && 'text-primary'
+              )}
+              title={hasExistingChat ? 'Continue conversation about this matchup' : 'Start a conversation about this matchup'}
+            >
+              <MessageCircle className="h-3.5 w-3.5" />
+              {hasExistingChat ? 'Chat' : 'Ask DD'}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Time Until Game (for upcoming games) */}
@@ -133,46 +166,60 @@ export const MatchCard = memo(function MatchCard({ game, market: marketProp, cla
 
       {/* Teams Display */}
       <div className="flex flex-col gap-3">
-        {/* Away Team */}
-        <TeamRow
-          team={game.away.team}
-          score={game.away.score}
-          record={game.away.record}
-          odds={getTeamOddsFromParsedMarket(currentParsedMarket, game.away.team.name, false)}
-          marketType={selectedMarketType}
-          line={currentParsedMarket?.line}
-          isAway
-          isFirst={false}
-        />
+        {(() => {
+          // Get odds for both teams using robust matching
+          const awayOdds = getTeamOddsFromParsedMarket(currentParsedMarket, game.away.team.name, game.away.team.alias, false);
+          const homeOdds = getTeamOddsFromParsedMarket(currentParsedMarket, game.home.team.name, game.home.team.alias, true);
+          
+          // Determine which team has higher odds (is the favorite)
+          const awayIsHigher = awayOdds !== null && homeOdds !== null ? awayOdds >= homeOdds : awayOdds !== null;
+          const homeIsHigher = awayOdds !== null && homeOdds !== null ? homeOdds > awayOdds : homeOdds !== null;
+          
+          return (
+            <>
+              {/* Away Team */}
+              <TeamRow
+                team={game.away.team}
+                score={game.away.score}
+                record={game.away.record}
+                odds={awayOdds}
+                marketType={selectedMarketType}
+                line={currentParsedMarket?.line}
+                isAway
+                isHigherOdds={awayIsHigher}
+              />
 
-        {/* VS Separator with Clock */}
-        <div className="flex items-center gap-2 px-2">
-          <div className="flex-1 h-px bg-border" />
-          <div className="flex flex-col items-center">
-            {game.isLive && game.clock ? (
-              <div className="flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                <span className="text-xs font-mono text-muted-foreground">
-                  Q{game.clock.quarter} {game.clock.time}
-                </span>
+              {/* VS Separator with Clock */}
+              <div className="flex items-center gap-2 px-2">
+                <div className="flex-1 h-px bg-border" />
+                <div className="flex flex-col items-center">
+                  {game.isLive && game.clock ? (
+                    <div className="flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                      <span className="text-xs font-mono text-muted-foreground">
+                        Q{game.clock.quarter} {game.clock.time}
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">VS</span>
+                  )}
+                </div>
+                <div className="flex-1 h-px bg-border" />
               </div>
-            ) : (
-              <span className="text-xs text-muted-foreground">VS</span>
-            )}
-          </div>
-          <div className="flex-1 h-px bg-border" />
-        </div>
 
-        {/* Home Team */}
-        <TeamRow
-          team={game.home.team}
-          score={game.home.score}
-          record={game.home.record}
-          odds={getTeamOddsFromParsedMarket(currentParsedMarket, game.home.team.name, true)}
-          marketType={selectedMarketType}
-          line={currentParsedMarket?.line}
-          isFirst={true}
-        />
+              {/* Home Team */}
+              <TeamRow
+                team={game.home.team}
+                score={game.home.score}
+                record={game.home.record}
+                odds={homeOdds}
+                marketType={selectedMarketType}
+                line={currentParsedMarket?.line}
+                isHigherOdds={homeIsHigher}
+              />
+            </>
+          );
+        })()}
       </div>
 
       {/* Odds Bar (if market available) */}
@@ -335,29 +382,31 @@ interface TeamRowProps {
   marketType: SportsMarketType;
   line?: number;
   isAway?: boolean;
-  isFirst: boolean;
+  /** Whether this team has the higher odds (is the favorite) */
+  isHigherOdds: boolean;
 }
 
 /**
  * TeamRow - memoized to prevent re-renders when team data hasn't changed
  */
-const TeamRow = memo(function TeamRow({ team, score, record, odds, marketType, line, isAway, isFirst }: TeamRowProps) {
+const TeamRow = memo(function TeamRow({ team, score, record, odds, marketType, line, isAway, isHigherOdds }: TeamRowProps) {
   const hasScore = score > 0;
 
   // Format odds display based on market type
   const formatOddsDisplay = (): string => {
     if (odds === null) return '-';
     
-    // For spreads, show the line
+    // For spreads, show the line based on whether this team is favored
     if (marketType === 'SPREAD' && line !== undefined) {
-      const displayLine = isFirst ? line : -line;
+      // Favorite gets negative line, underdog gets positive
+      const displayLine = isHigherOdds ? -Math.abs(line) : Math.abs(line);
       const lineStr = displayLine > 0 ? `+${displayLine}` : displayLine.toString();
       return `${lineStr} (${formatPriceAsPercentage(odds)})`;
     }
     
-    // For totals
+    // For totals, show Over/Under based on position (first team = Over, second = Under)
     if (marketType === 'TOTAL' && line !== undefined) {
-      const label = isFirst ? 'O' : 'U';
+      const label = !isAway ? 'O' : 'U';
       return `${label} ${line} (${formatPriceAsPercentage(odds)})`;
     }
     
@@ -396,7 +445,7 @@ const TeamRow = memo(function TeamRow({ team, score, record, odds, marketType, l
           <div className="flex flex-col items-end">
             <span className={cn(
               'text-xs font-medium hud-data',
-              isFirst ? 'text-green-400' : 'text-red-400'
+              isHigherOdds ? 'text-green-400' : 'text-red-400'
             )}>
               {formatOddsDisplay()}
             </span>
@@ -489,6 +538,7 @@ const GameMarketDisplay = memo(function GameMarketDisplay({ market, totalVolume,
           // Determine which outcome has the higher percentage
           const higherIndex = market.outcomes[0].price >= market.outcomes[1]?.price ? 0 : 1;
           const isHigher = index === higherIndex;
+          const polymarketUrl = eventSlug ? `https://polymarket.com/event/${eventSlug}` : undefined;
           
           // Use ShinyButton for losing team (lower percentage), MarketButton for winning team
           if (isHigher) {
@@ -499,6 +549,7 @@ const GameMarketDisplay = memo(function GameMarketDisplay({ market, totalVolume,
                 percentage={formatPriceAsPercentage(outcome.price)}
                 odds={formatPriceAsAmericanOdds(outcome.price)}
                 isHigher={isHigher}
+                href={polymarketUrl}
               />
             );
           } else {
@@ -508,6 +559,7 @@ const GameMarketDisplay = memo(function GameMarketDisplay({ market, totalVolume,
                 name={outcome.name}
                 percentage={formatPriceAsPercentage(outcome.price)}
                 odds={formatPriceAsAmericanOdds(outcome.price)}
+                href={polymarketUrl}
               />
             );
           }
@@ -631,31 +683,21 @@ const GameMarketDisplay = memo(function GameMarketDisplay({ market, totalVolume,
         </div>
       )}
 
-      {/* Link to Polymarket */}
-      {eventSlug && (
-        <a
-          href={`https://polymarket.com/event/${eventSlug}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs font-medium transition-colors"
-        >
-          <TrendingUp className="h-3 w-3" />
-          <span>Trade on Polymarket</span>
-          <ExternalLink className="h-2.5 w-2.5" />
-        </a>
-      )}
     </div>
   );
 });
 
 /**
  * Parsed Market Odds Bar - Visual representation of odds
+ * Always shows higher percentage (favorite) on the left in green
  */
 const ParsedMarketOddsBar = memo(function ParsedMarketOddsBar({ outcomes }: { outcomes: Array<{ name: string; price: number }> }) {
   if (outcomes.length < 2) return null;
 
-  const leftPct = Math.round(outcomes[0].price * 100);
-  const rightPct = Math.round(outcomes[1].price * 100);
+  // Sort to ensure favorite (higher %) is always on the left
+  const sorted = [...outcomes].sort((a, b) => b.price - a.price);
+  const leftPct = Math.round(sorted[0].price * 100);
+  const rightPct = Math.round(sorted[1].price * 100);
 
   return (
     <div className="flex items-center gap-1 w-full">
@@ -744,40 +786,119 @@ function NoMarketDataDisplay() {
 }
 
 /**
+ * Normalize a team name for comparison by removing spaces, special chars, and lowercasing
+ */
+function normalizeTeamName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Find the mascot/nickname from a team identifier using TEAM_ALIASES
+ */
+function findMascotFromTeam(teamName: string, alias?: string): string | null {
+  const normalized = normalizeTeamName(teamName);
+  const aliasNormalized = alias ? normalizeTeamName(alias) : null;
+  
+  // Check if team name directly matches a mascot
+  for (const [mascot, aliases] of Object.entries(TEAM_ALIASES)) {
+    const mascotNorm = normalizeTeamName(mascot);
+    
+    // Direct mascot match
+    if (normalized === mascotNorm || normalized.includes(mascotNorm)) {
+      return mascot;
+    }
+    
+    // Check aliases (abbreviation, full name variants)
+    for (const aliasEntry of aliases) {
+      const aliasEntryNorm = normalizeTeamName(aliasEntry);
+      if (normalized === aliasEntryNorm || normalized.includes(aliasEntryNorm)) {
+        return mascot;
+      }
+      // Also check team alias (like "POR", "WAS")
+      if (aliasNormalized && aliasNormalized === aliasEntryNorm) {
+        return mascot;
+      }
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Check if an outcome name matches a team
+ */
+function outcomeMatchesTeam(outcomeName: string, teamName: string, teamAlias?: string): boolean {
+  const outcomeNorm = normalizeTeamName(outcomeName);
+  const teamNorm = normalizeTeamName(teamName);
+  
+  // Direct match (handles "Trail Blazers" vs "Trailblazers")
+  if (outcomeNorm === teamNorm || outcomeNorm.includes(teamNorm) || teamNorm.includes(outcomeNorm)) {
+    return true;
+  }
+  
+  // Find mascots for both and compare
+  const outcomeMascot = findMascotFromTeam(outcomeName);
+  const teamMascot = findMascotFromTeam(teamName, teamAlias);
+  
+  if (outcomeMascot && teamMascot && outcomeMascot === teamMascot) {
+    return true;
+  }
+  
+  // Check if team alias matches outcome
+  if (teamAlias) {
+    const aliasNorm = normalizeTeamName(teamAlias);
+    // Check if outcome contains the alias (e.g., "POR" in outcome)
+    if (outcomeNorm.includes(aliasNorm)) {
+      return true;
+    }
+    
+    // Check via TEAM_ALIASES - if alias maps to a mascot that's in the outcome
+    for (const [mascot, aliases] of Object.entries(TEAM_ALIASES)) {
+      const mascotNorm = normalizeTeamName(mascot);
+      if (aliases.some(a => normalizeTeamName(a) === aliasNorm)) {
+        // This alias maps to this mascot
+        if (outcomeNorm.includes(mascotNorm)) {
+          return true;
+        }
+      }
+    }
+  }
+  
+  return false;
+}
+
+/**
  * Helper to extract team odds from ParsedGameMarket
+ * Uses robust matching with aliases and normalized names
  */
 function getTeamOddsFromParsedMarket(
   market: ParsedGameMarket | null, 
-  teamName: string, 
-  isFirst: boolean
+  teamName: string,
+  teamAlias: string | undefined,
+  _isFirst: boolean
 ): number | null {
   if (!market || market.outcomes.length === 0 || !teamName) return null;
   
-  const teamLower = teamName.toLowerCase();
+  // For totals, Over/Under doesn't correspond to teams
+  if (market.type === 'TOTAL') {
+    // Return Over for first team display, Under for second
+    // This is just for display purposes - totals aren't team-specific
+    const idx = _isFirst ? 0 : 1;
+    return market.outcomes[idx]?.price ?? null;
+  }
   
-  // For moneyline/spread, find the team in outcomes
+  // For moneyline/spread, find the team in outcomes using robust matching
   for (const outcome of market.outcomes) {
     if (!outcome?.name) continue;
-    const outcomeLower = outcome.name.toLowerCase();
-    if (outcomeLower.includes(teamLower)) {
+    
+    if (outcomeMatchesTeam(outcome.name, teamName, teamAlias)) {
       return outcome.price;
     }
   }
 
-  // For totals, return Over for first team, Under for second
-  if (market.type === 'TOTAL') {
-    // First (home) gets Over, second (away) gets Under
-    const idx = isFirst ? 0 : 1;
-    return market.outcomes[idx]?.price ?? null;
-  }
-
-  // Fallback: first outcome for first team, second for second
-  if (market.outcomes.length >= 2) {
-    const idx = isFirst ? 0 : 1;
-    return market.outcomes[idx].price;
-  }
-
-  return market.outcomes[0]?.price ?? null;
+  // No match found - don't guess, return null
+  // This prevents showing incorrect odds when matching fails
+  return null;
 }
 
 
@@ -816,19 +937,23 @@ export const MinimalMatchCard = memo(function MinimalMatchCard({ game, market, i
           </div>
           
           {/* Quick odds if available */}
-          {market && (
+          {market && market.market.outcomes.length >= 2 && (
             <div className="flex items-center gap-2 mt-0.5">
-              {market.market.outcomes.slice(0, 2).map((outcome, index) => (
-                <span 
-                  key={outcome.tokenId || index} 
-                  className={cn(
-                    'text-[10px]',
-                    index === 0 ? 'text-green-400' : 'text-red-400'
-                  )}
-                >
-                  {formatPriceAsPercentage(outcome.price)}
-                </span>
-              ))}
+              {market.market.outcomes.slice(0, 2).map((outcome, index) => {
+                // Determine if this outcome is the favorite (higher price)
+                const isHigher = outcome.price >= (market.market.outcomes[1 - index]?.price ?? 0);
+                return (
+                  <span 
+                    key={outcome.tokenId || index} 
+                    className={cn(
+                      'text-[10px]',
+                      isHigher ? 'text-green-400' : 'text-red-400'
+                    )}
+                  >
+                    {formatPriceAsPercentage(outcome.price)}
+                  </span>
+                );
+              })}
             </div>
           )}
         </div>
@@ -871,20 +996,6 @@ export const ExpandedMatchCard = memo(function ExpandedMatchCard({ game, market,
         game={game} 
         market={market} 
       />
-      
-      {/* Polymarket Link */}
-      {market && (
-        <a
-          href={`https://polymarket.com/event/${market.eventSlug}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-sm font-medium transition-colors"
-        >
-          <TrendingUp className="h-4 w-4" />
-          <span>Trade on Polymarket</span>
-          <ExternalLink className="h-3 w-3" />
-        </a>
-      )}
     </div>
   );
 });

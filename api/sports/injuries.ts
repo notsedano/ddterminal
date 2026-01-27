@@ -75,6 +75,8 @@ export default async function handler(
   const cachedEntry = injuriesCache.get(cacheKey);
   
   if (isValidCache(cachedEntry)) {
+    // CDN cache for 10 minutes, stale-while-revalidate for 15 minutes
+    res.setHeader('Cache-Control', 's-maxage=600, stale-while-revalidate=900');
     return res.status(200).json({
       success: true,
       data: cachedEntry.data,
@@ -115,6 +117,8 @@ export default async function handler(
     timestamp: Date.now(),
   });
 
+  // CDN cache for 10 minutes, stale-while-revalidate for 15 minutes
+  res.setHeader('Cache-Control', 's-maxage=600, stale-while-revalidate=900');
   return res.status(200).json({
     success: true,
     data,

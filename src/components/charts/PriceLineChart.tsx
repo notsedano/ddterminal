@@ -4,7 +4,7 @@
  */
 
 import { LineChart } from '@mui/x-charts/LineChart';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, memo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { cn } from '@/utils/cn';
@@ -26,8 +26,8 @@ interface TimeRangeConfig {
 const TIME_RANGE_CONFIG: Record<TimeRange, TimeRangeConfig> = {
   '1h': { label: '1H', interval: '1h', fidelity: 1, tickFormat: 'HH:mm' },
   '6h': { label: '6H', interval: '6h', fidelity: 5, tickFormat: 'HH:mm' },
-  '24h': { label: '1d', interval: '1d', fidelity: 1, tickFormat: 'HH:mm' },
-  '7d': { label: '7D', interval: '1w', fidelity: 1, tickFormat: 'MMM d' },
+  '24h': { label: '1D', interval: '1d', fidelity: 1, tickFormat: 'HH:mm' },
+  '7d': { label: '7D', interval: '1d', fidelity: 60, tickFormat: 'MMM d' },  // Use daily interval for 7 days
 };
 
 interface PriceLineChartProps {
@@ -42,9 +42,9 @@ interface PriceLineChartProps {
 }
 
 /**
- * MUI X Charts price line chart with area fill
+ * MUI X Charts price line chart with area fill - memoized for stable token data
  */
-export function PriceLineChart({
+export const PriceLineChart = memo(function PriceLineChart({
   tokenId,
   outcomeName,
   className,
@@ -254,7 +254,7 @@ export function PriceLineChart({
       </div>
     </ChartThemeProvider>
   );
-}
+});
 
 /**
  * Price change indicator with icon
@@ -299,7 +299,246 @@ interface MultiOutcomePriceChartProps {
   className?: string;
 }
 
-export function MultiOutcomePriceChart({ market, height = 220, className }: MultiOutcomePriceChartProps) {
+/**
+ * Multi-outcome price comparison chart - memoized
+ */
+/**
+ * Outcome Comparison Chart
+ * Compares price history for multiple outcomes (e.g., both teams in a game)
+ * Takes outcomes directly with tokenIds - works with ParsedGameMarket
+ */
+interface OutcomeComparisonChartProps {
+  outcomes: Array<{
+    tokenId: string;
+    name: string;
+    price?: number;
+  }>;
+  height?: number;
+  className?: string;
+  showTimeSelector?: boolean;
+  defaultTimeRange?: TimeRange;
+}
+
+export const OutcomeComparisonChart = memo(function OutcomeComparisonChart({
+  outcomes,
+  height = 200,
+  className,
+  showTimeSelector = true,
+  defaultTimeRange = '24h',
+}: OutcomeComparisonChartProps) {
+  const [timeRange, setTimeRange] = useState<TimeRange>(defaultTimeRange);
+  const config = TIME_RANGE_CONFIG[timeRange];
+
+  const now = Math.floor(Date.now() / 1000);
+  const startTs = useMemo(() => {
+    const hourSeconds = 3600;
+    const daySeconds = 86400;
+    
+    switch (timeRange) {
+      case '1h': return now - hourSeconds;
+      case '6h': return now - hourSeconds * 6;
+      case '24h': return now - daySeconds;
+      case '7d': return now - daySeconds * 7;
+      default: return now - daySeconds;
+    }
+  }, [timeRange, now]);
+
+  // Only use first two outcomes for comparison (team A vs team B)
+  const comparisonOutcomes = outcomes.slice(0, 2).filter(o => o.tokenId);
+
+  // Fetch price history for first outcome
+  const outcome1Query = useQuery<PolymarketPriceHistoryPoint[], Error>({
+    queryKey: ['polymarket', 'price-history', comparisonOutcomes[0]?.tokenId, timeRange],
+    queryFn: () => getPriceHistory(comparisonOutcomes[0].tokenId, {
+      interval: config.interval,
+      startTs,
+      endTs: now,
+      fidelity: config.fidelity,
+    }),
+    staleTime: 60 * 1000,
+    enabled: !!comparisonOutcomes[0]?.tokenId,
+  });
+
+  // Fetch price history for second outcome
+  const outcome2Query = useQuery<PolymarketPriceHistoryPoint[], Error>({
+    queryKey: ['polymarket', 'price-history', comparisonOutcomes[1]?.tokenId, timeRange],
+    queryFn: () => getPriceHistory(comparisonOutcomes[1].tokenId, {
+      interval: config.interval,
+      startTs,
+      endTs: now,
+      fidelity: config.fidelity,
+    }),
+    staleTime: 60 * 1000,
+    enabled: !!comparisonOutcomes[1]?.tokenId,
+  });
+
+  const isLoading = outcome1Query.isLoading || outcome2Query.isLoading;
+
+  // Prepare chart data
+  const chartConfig = useMemo(() => {
+    const data1 = outcome1Query.data;
+    const data2 = outcome2Query.data;
+
+    // Need at least one series with data
+    if ((!data1 || data1.length < 2) && (!data2 || data2.length < 2)) {
+      return null;
+    }
+
+    // Use the longer dataset for timestamps
+    const timestamps = (data1 && data1.length >= (data2?.length || 0))
+      ? data1.map(p => new Date(p.t * 1000))
+      : data2?.map(p => new Date(p.t * 1000)) || [];
+
+    const seriesData: Array<{
+      name: string;
+      data: (number | null)[];
+      color: string;
+    }> = [];
+
+    if (data1 && data1.length >= 2) {
+      seriesData.push({
+        name: comparisonOutcomes[0]?.name || 'Team 1',
+        data: data1.map(p => p.p),
+        color: chartColors.success, // Green for first team
+      });
+    }
+
+    if (data2 && data2.length >= 2) {
+      // Align data2 to the same timestamp length as data1
+      const alignedData = data2.map(p => p.p);
+      seriesData.push({
+        name: comparisonOutcomes[1]?.name || 'Team 2',
+        data: alignedData,
+        color: chartColors.danger, // Red for second team
+      });
+    }
+
+    if (timestamps.length === 0 || seriesData.length === 0) return null;
+
+    return { timestamps, seriesData };
+  }, [outcome1Query.data, outcome2Query.data, comparisonOutcomes]);
+
+  if (isLoading) {
+    return (
+      <div className={cn('flex items-center justify-center', className)} style={{ height }}>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Clock className="h-4 w-4 animate-pulse" />
+          <span>Loading comparison...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!chartConfig) {
+    return (
+      <div className={cn('flex items-center justify-center', className)} style={{ height }}>
+        <div className="text-sm text-muted-foreground">
+          No price history available for comparison
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <ChartThemeProvider>
+      <div className={cn('flex flex-col gap-2', className)}>
+        {/* Header with legend and time selector */}
+        <div className="flex items-center justify-between">
+          {/* Legend */}
+          <div className="flex items-center gap-3">
+            {chartConfig.seriesData.map((series) => (
+              <div key={series.name} className="flex items-center gap-1.5 text-xs">
+                <div 
+                  className="w-2.5 h-2.5 rounded-sm" 
+                  style={{ backgroundColor: series.color }}
+                />
+                <span className="text-muted-foreground truncate max-w-[80px]">{series.name}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Time range selector */}
+          {showTimeSelector && (
+            <div className="flex gap-1">
+              {(Object.keys(TIME_RANGE_CONFIG) as TimeRange[]).map((range) => (
+                <button
+                  key={range}
+                  onClick={() => setTimeRange(range)}
+                  className={cn(
+                    'px-2 py-1 text-xs rounded-md transition-colors',
+                    timeRange === range
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground'
+                  )}
+                >
+                  {TIME_RANGE_CONFIG[range].label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Chart */}
+        <div style={{ height }}>
+          <LineChart
+            xAxis={[{
+              data: chartConfig.timestamps,
+              scaleType: 'time',
+              tickLabelStyle: { fontSize: 10 },
+              valueFormatter: (value: Date) => format(value, config.tickFormat),
+              tickNumber: 5,
+            }]}
+            yAxis={[{
+              min: 0,
+              max: 1,
+              tickLabelStyle: {
+                fontSize: 10,
+                fontFamily: 'ui-monospace, monospace',
+              },
+              valueFormatter: (value: number) => formatPriceAsPercentage(value),
+              tickNumber: 5,
+            }]}
+            series={chartConfig.seriesData.map(s => ({
+              data: s.data,
+              label: s.name,
+              color: s.color,
+              showMark: false,
+              valueFormatter: (value: number | null) => 
+                value !== null ? formatPriceAsPercentage(value) : '',
+            }))}
+            margin={{ left: 50, right: 10, top: 10, bottom: 25 }}
+            hideLegend
+            sx={{
+              '& .MuiLineElement-root': {
+                strokeWidth: 2,
+              },
+            }}
+          />
+        </div>
+
+        {/* Current prices */}
+        <div className="flex justify-between px-1 text-xs">
+          {chartConfig.seriesData.map((series) => {
+            const currentPrice = series.data[series.data.length - 1];
+            return (
+              <div key={series.name} className="flex items-center gap-1.5">
+                <span className="text-muted-foreground">{series.name}:</span>
+                <span 
+                  className="font-mono font-medium"
+                  style={{ color: series.color }}
+                >
+                  {currentPrice !== null ? formatPriceAsPercentage(currentPrice) : '-'}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </ChartThemeProvider>
+  );
+});
+
+export const MultiOutcomePriceChart = memo(function MultiOutcomePriceChart({ market, height = 220, className }: MultiOutcomePriceChartProps) {
   const outcomes = market.market.outcomes;
   const [timeRange, setTimeRange] = useState<TimeRange>('24h');
   const config = TIME_RANGE_CONFIG[timeRange];
@@ -478,6 +717,6 @@ export function MultiOutcomePriceChart({ market, height = 220, className }: Mult
       </div>
     </ChartThemeProvider>
   );
-}
+});
 
 export default PriceLineChart;

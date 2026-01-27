@@ -5,13 +5,13 @@
 
 import type {
   PolymarketEvent,
-  PolymarketMarket,
   PolymarketSportsMarket,
   PolymarketSportsMetadata,
   PolymarketTag,
   SportsMarketType,
 } from '@/types';
 import { transformToSportsMarket, transformAllMarketsFromEvent } from '@/types';
+import { TEAM_ALIASES, NBA_KEYWORDS } from '@/data';
 
 // API Configuration
 // Always use proxy/serverless function to avoid CORS issues
@@ -263,23 +263,7 @@ export async function getMarkets(options: {
   return response.json();
 }
 
-// NBA Team names and keywords for matching
-const NBA_KEYWORDS = [
-  // Team names (mascots)
-  'lakers', 'celtics', 'warriors', 'bulls', 'heat', 'knicks', 'nets',
-  'bucks', 'suns', 'mavericks', 'mavs', 'nuggets', 'clippers', 'sixers', '76ers',
-  'raptors', 'spurs', 'hawks', 'timberwolves', 'wolves', 'grizzlies', 'pelicans',
-  'pels', 'thunder', 'trail blazers', 'blazers', 'jazz', 'kings', 'pistons',
-  'pacers', 'hornets', 'magic', 'wizards', 'cavaliers', 'cavs', 'rockets',
-  // Cities
-  'los angeles', 'boston', 'golden state', 'chicago', 'miami', 'new york',
-  'brooklyn', 'milwaukee', 'phoenix', 'dallas', 'denver', 'philadelphia',
-  'toronto', 'san antonio', 'atlanta', 'minnesota', 'memphis', 'new orleans',
-  'oklahoma city', 'portland', 'utah', 'sacramento', 'detroit', 'indiana',
-  'charlotte', 'orlando', 'washington', 'cleveland', 'houston',
-  // Keywords
-  'nba',
-];
+// NBA_KEYWORDS imported from @/data for optimal tree-shaking
 
 /**
  * Check if an event is NBA-related based on title and tags
@@ -336,16 +320,18 @@ export async function getEventsByTagSlug(tagSlug: string, options: {
 /**
  * Fetch NBA-related events from Polymarket
  * Uses tag_slug for proper filtering - focuses on NBA Championship/Finals markets
+ * 
+ * @param includeCompleted - If true, also fetches recently completed/closed events
  */
-export async function getNBAEvents(): Promise<PolymarketEvent[]> {
-  // Check cache first
-  if (isCacheValid(cache.nbaEvents, CACHE_TTL.nbaEvents)) {
+export async function getNBAEvents(includeCompleted: boolean = false): Promise<PolymarketEvent[]> {
+  // Check cache first (only for default active-only requests)
+  if (!includeCompleted && isCacheValid(cache.nbaEvents, CACHE_TTL.nbaEvents)) {
     return cache.nbaEvents.data;
   }
 
   const allEvents = new Map<string, PolymarketEvent>();
 
-  // Strategy 1: Use tag_slug for NBA-related tags
+  // Strategy 1: Use tag_slug for NBA-related tags - ACTIVE events
   const tagSlugs = ['nba-finals', 'sports'];
   const tagPromises = tagSlugs.map(slug => 
     getEventsByTagSlug(slug, { active: true, closed: false, limit: 50 })
@@ -362,7 +348,7 @@ export async function getNBAEvents(): Promise<PolymarketEvent[]> {
     }
   }
 
-  // Strategy 2: Fetch high volume events and filter for NBA
+  // Strategy 2: Fetch high volume ACTIVE events and filter for NBA
   const activeEventsResponse = await getEvents({
     active: true,
     closed: false,
@@ -377,8 +363,30 @@ export async function getNBAEvents(): Promise<PolymarketEvent[]> {
     }
   }
 
+  // Strategy 3: Fetch recently CLOSED events if requested
+  // This preserves historical data for completed games
+  if (includeCompleted) {
+    const closedEventsResponse = await getEvents({
+      active: false,
+      closed: true,
+      limit: 100,
+      order: 'volume',
+      ascending: false,
+    }).catch(() => [] as PolymarketEvent[]);
+
+    for (const event of closedEventsResponse) {
+      if (isNBAEvent(event) && !allEvents.has(event.id)) {
+        allEvents.set(event.id, event);
+      }
+    }
+  }
+
   const events = Array.from(allEvents.values());
-  cache.nbaEvents = { data: events, timestamp: Date.now() };
+  
+  // Only cache if this is the default active-only request
+  if (!includeCompleted) {
+    cache.nbaEvents = { data: events, timestamp: Date.now() };
+  }
   
   return events;
 }
@@ -473,22 +481,27 @@ function matchesGame(
   homeTeam: { name: string; market: string; alias: string },
   awayTeam: { name: string; market: string; alias: string }
 ): boolean {
+  // Safety check for required fields
+  if (!event.title || !homeTeam?.name || !awayTeam?.name) {
+    return false;
+  }
+
   const title = event.title.toLowerCase();
 
-  // Build team identifiers
+  // Build team identifiers with null safety
   const homeIds = [
-    homeTeam.name.toLowerCase(),
-    homeTeam.market.toLowerCase(),
-    homeTeam.alias.toLowerCase(),
-    `${homeTeam.market} ${homeTeam.name}`.toLowerCase(),
-  ];
+    homeTeam.name?.toLowerCase(),
+    homeTeam.market?.toLowerCase(),
+    homeTeam.alias?.toLowerCase(),
+    homeTeam.market && homeTeam.name ? `${homeTeam.market} ${homeTeam.name}`.toLowerCase() : null,
+  ].filter((id): id is string => Boolean(id));
 
   const awayIds = [
-    awayTeam.name.toLowerCase(),
-    awayTeam.market.toLowerCase(),
-    awayTeam.alias.toLowerCase(),
-    `${awayTeam.market} ${awayTeam.name}`.toLowerCase(),
-  ];
+    awayTeam.name?.toLowerCase(),
+    awayTeam.market?.toLowerCase(),
+    awayTeam.alias?.toLowerCase(),
+    awayTeam.market && awayTeam.name ? `${awayTeam.market} ${awayTeam.name}`.toLowerCase() : null,
+  ].filter((id): id is string => Boolean(id));
 
   const hasHome = homeIds.some(id => title.includes(id));
   const hasAway = awayIds.some(id => title.includes(id));
@@ -567,29 +580,43 @@ export async function getChampionshipOddsForGame(
   home: { odds: number; volume: string; marketId: string } | null;
   away: { odds: number; volume: string; marketId: string } | null;
 }> {
+  // Safety check for required fields
+  if (!homeTeam?.name || !awayTeam?.name) {
+    return { home: null, away: null };
+  }
+
   const allOdds = await getNBAChampionshipOdds();
   
-  // Find home team odds
-  const homeFullName = `${homeTeam.market} ${homeTeam.name}`.toLowerCase();
-  const awayFullName = `${awayTeam.market} ${awayTeam.name}`.toLowerCase();
+  // Find home team odds with null safety
+  const homeFullName = homeTeam.market && homeTeam.name 
+    ? `${homeTeam.market} ${homeTeam.name}`.toLowerCase() 
+    : homeTeam.name?.toLowerCase() || '';
+  const awayFullName = awayTeam.market && awayTeam.name 
+    ? `${awayTeam.market} ${awayTeam.name}`.toLowerCase() 
+    : awayTeam.name?.toLowerCase() || '';
   
   let homeOdds: { odds: number; volume: string; marketId: string } | null = null;
   let awayOdds: { odds: number; volume: string; marketId: string } | null = null;
+  
+  const homeNameLower = homeTeam.name?.toLowerCase() || '';
+  const homeMarketLower = homeTeam.market?.toLowerCase() || '';
+  const awayNameLower = awayTeam.name?.toLowerCase() || '';
+  const awayMarketLower = awayTeam.market?.toLowerCase() || '';
   
   for (const [teamName, odds] of Object.entries(allOdds)) {
     const teamNameLower = teamName.toLowerCase();
     
     // Check home team
-    if (teamNameLower.includes(homeTeam.name.toLowerCase()) ||
-        teamNameLower.includes(homeTeam.market.toLowerCase()) ||
-        homeFullName.includes(teamNameLower)) {
+    if ((homeNameLower && teamNameLower.includes(homeNameLower)) ||
+        (homeMarketLower && teamNameLower.includes(homeMarketLower)) ||
+        (homeFullName && homeFullName.includes(teamNameLower))) {
       homeOdds = odds;
     }
     
     // Check away team
-    if (teamNameLower.includes(awayTeam.name.toLowerCase()) ||
-        teamNameLower.includes(awayTeam.market.toLowerCase()) ||
-        awayFullName.includes(teamNameLower)) {
+    if ((awayNameLower && teamNameLower.includes(awayNameLower)) ||
+        (awayMarketLower && teamNameLower.includes(awayMarketLower)) ||
+        (awayFullName && awayFullName.includes(teamNameLower))) {
       awayOdds = odds;
     }
   }
@@ -649,42 +676,7 @@ export interface GameMarketData {
   lastUpdated: Date;
 }
 
-/**
- * Team abbreviation mappings for matching Sportradar to Polymarket
- */
-const TEAM_ALIASES: Record<string, string[]> = {
-  // Format: Polymarket name variants -> common identifiers
-  'lakers': ['lal', 'los angeles lakers', 'la lakers'],
-  'celtics': ['bos', 'boston celtics'],
-  'warriors': ['gsw', 'golden state warriors', 'gs warriors'],
-  'bulls': ['chi', 'chicago bulls'],
-  'heat': ['mia', 'miami heat'],
-  'knicks': ['nyk', 'new york knicks', 'ny knicks'],
-  'nets': ['bkn', 'brooklyn nets'],
-  'bucks': ['mil', 'milwaukee bucks'],
-  'suns': ['phx', 'phoenix suns'],
-  'mavericks': ['dal', 'dallas mavericks', 'mavs'],
-  'nuggets': ['den', 'denver nuggets'],
-  'clippers': ['lac', 'la clippers', 'los angeles clippers'],
-  'sixers': ['phi', 'philadelphia 76ers', '76ers'],
-  'raptors': ['tor', 'toronto raptors'],
-  'spurs': ['sas', 'san antonio spurs'],
-  'hawks': ['atl', 'atlanta hawks'],
-  'timberwolves': ['min', 'minnesota timberwolves', 'wolves'],
-  'grizzlies': ['mem', 'memphis grizzlies'],
-  'pelicans': ['nop', 'new orleans pelicans', 'pels'],
-  'thunder': ['okc', 'oklahoma city thunder'],
-  'trail blazers': ['por', 'portland trail blazers', 'blazers'],
-  'jazz': ['uta', 'utah jazz'],
-  'kings': ['sac', 'sacramento kings'],
-  'pistons': ['det', 'detroit pistons'],
-  'pacers': ['ind', 'indiana pacers'],
-  'hornets': ['cha', 'charlotte hornets'],
-  'magic': ['orl', 'orlando magic'],
-  'wizards': ['was', 'washington wizards'],
-  'cavaliers': ['cle', 'cleveland cavaliers', 'cavs'],
-  'rockets': ['hou', 'houston rockets'],
-};
+// TEAM_ALIASES imported from @/data for optimal tree-shaking
 
 /**
  * Get all NBA game events (events with team matchups)
@@ -897,22 +889,29 @@ export async function findGameEvent(
   homeTeam: { name: string; market?: string; alias: string },
   awayTeam: { name: string; market?: string; alias: string }
 ): Promise<PolymarketEvent | null> {
+  // Safety check for required fields
+  if (!homeTeam?.name || !awayTeam?.name) {
+    return null;
+  }
+
   const gameEvents = await getNBAGameEvents();
   
-  // Build search terms for each team
+  // Build search terms for each team with null safety
   const homeTerms = [
-    homeTeam.name.toLowerCase(),
-    homeTeam.alias.toLowerCase(),
-    homeTeam.market?.toLowerCase() || '',
-  ].filter(Boolean);
+    homeTeam.name?.toLowerCase(),
+    homeTeam.alias?.toLowerCase(),
+    homeTeam.market?.toLowerCase(),
+  ].filter((term): term is string => Boolean(term));
   
   const awayTerms = [
-    awayTeam.name.toLowerCase(),
-    awayTeam.alias.toLowerCase(),
-    awayTeam.market?.toLowerCase() || '',
-  ].filter(Boolean);
+    awayTeam.name?.toLowerCase(),
+    awayTeam.alias?.toLowerCase(),
+    awayTeam.market?.toLowerCase(),
+  ].filter((term): term is string => Boolean(term));
   
   for (const event of gameEvents) {
+    if (!event.title) continue;
+    
     const title = event.title.toLowerCase();
     
     // Check if both teams are in the title
@@ -932,6 +931,9 @@ export async function findGameEvent(
 /**
  * Build the Polymarket slug for an NBA game
  * Format: nba-{away_alias_lowercase}-{home_alias_lowercase}-{YYYY-MM-DD}
+ * 
+ * IMPORTANT: Polymarket uses Eastern Time (ET) for game dates, not UTC.
+ * A game at 7pm ET on Jan 27 should use 2026-01-27, not 2026-01-28 (UTC).
  */
 function buildGameSlug(
   homeTeam: { alias: string },
@@ -940,51 +942,72 @@ function buildGameSlug(
 ): string {
   const awayAlias = awayTeam.alias.toLowerCase();
   const homeAlias = homeTeam.alias.toLowerCase();
-  const dateStr = gameDate.toISOString().split('T')[0]; // YYYY-MM-DD
-  return `nba-${awayAlias}-${homeAlias}-${dateStr}`;
+  
+  // Convert to Eastern Time to get the correct date
+  // Polymarket uses ET for their game slugs
+  const etDateStr = gameDate.toLocaleDateString('en-CA', { 
+    timeZone: 'America/New_York' 
+  }); // Returns YYYY-MM-DD format
+  
+  return `nba-${awayAlias}-${homeAlias}-${etDateStr}`;
 }
 
 // Cache for failed slugs to prevent repeated 404s
+// Reduced to 1 minute so markets are found faster when they become available
 const failedSlugCache = new Set<string>();
-const FAILED_SLUG_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const FAILED_SLUG_CACHE_TTL = 1 * 60 * 1000; // 1 minute (reduced from 5 min)
 const failedSlugTimestamps = new Map<string, number>();
 
 /**
- * Fetch market data by slug using the Polymarket slug API
- * This is the most reliable way to get per-game markets
+ * Fetch game event data by slug using the Polymarket events API
+ * Game slugs like "nba-por-was-2026-01-27" are EVENT slugs, not market slugs.
+ * This is the most reliable way to get per-game markets.
  */
-async function fetchMarketBySlug(slug: string): Promise<PolymarketMarket | null> {
+async function fetchGameEventBySlug(slug: string): Promise<PolymarketEvent | null> {
   // Check if this slug recently failed (404)
-  const failedTimestamp = failedSlugTimestamps.get(slug);
-  if (failedSlugCache.has(slug) && failedTimestamp) {
+  const cacheKey = `game:${slug}`;
+  const failedTimestamp = failedSlugTimestamps.get(cacheKey);
+  if (failedSlugCache.has(cacheKey) && failedTimestamp) {
     // If it failed recently (within TTL), skip the request
     if (Date.now() - failedTimestamp < FAILED_SLUG_CACHE_TTL) {
       return null;
     }
     // Cache expired, remove it
-    failedSlugCache.delete(slug);
-    failedSlugTimestamps.delete(slug);
+    failedSlugCache.delete(cacheKey);
+    failedSlugTimestamps.delete(cacheKey);
   }
 
   try {
-    const response = await fetch(`${GAMMA_API}/markets/slug/${slug}`, {
+    // Use the events endpoint with slug query parameter
+    // This is how Polymarket structures their game URLs: /event/nba-xxx-xxx-date
+    const response = await fetch(`${GAMMA_API}/events?slug=${encodeURIComponent(slug)}`, {
       headers: { 'Accept': 'application/json' },
     });
     
     if (!response.ok) {
       // Cache 404s to prevent repeated failed requests
       if (response.status === 404) {
-        failedSlugCache.add(slug);
-        failedSlugTimestamps.set(slug, Date.now());
+        failedSlugCache.add(cacheKey);
+        failedSlugTimestamps.set(cacheKey, Date.now());
       }
       return null;
     }
     
-    // Success - remove from failed cache if it was there
-    failedSlugCache.delete(slug);
-    failedSlugTimestamps.delete(slug);
+    const events = await response.json();
+    const event = events?.[0] || null;
     
-    return response.json();
+    if (!event) {
+      // No event found, cache this as a failure
+      failedSlugCache.add(cacheKey);
+      failedSlugTimestamps.set(cacheKey, Date.now());
+      return null;
+    }
+    
+    // Success - remove from failed cache if it was there
+    failedSlugCache.delete(cacheKey);
+    failedSlugTimestamps.delete(cacheKey);
+    
+    return event;
   } catch (error) {
     // Network errors - don't cache, just return null
     return null;
@@ -992,52 +1015,11 @@ async function fetchMarketBySlug(slug: string): Promise<PolymarketMarket | null>
 }
 
 /**
- * Fetch event data by slug for spread/total markets
- */
-async function fetchEventBySlug(slug: string): Promise<PolymarketEvent | null> {
-  // Check if this slug recently failed (reuse the same cache)
-  const failedTimestamp = failedSlugTimestamps.get(`event:${slug}`);
-  if (failedSlugCache.has(`event:${slug}`) && failedTimestamp) {
-    if (Date.now() - failedTimestamp < FAILED_SLUG_CACHE_TTL) {
-      return null;
-    }
-    failedSlugCache.delete(`event:${slug}`);
-    failedSlugTimestamps.delete(`event:${slug}`);
-  }
-
-  try {
-    const response = await fetch(`${GAMMA_API}/events?slug=${encodeURIComponent(slug)}`, {
-      headers: { 'Accept': 'application/json' },
-    });
-    
-    if (!response.ok) {
-      // Cache failures to prevent repeated requests
-      failedSlugCache.add(`event:${slug}`);
-      failedSlugTimestamps.set(`event:${slug}`, Date.now());
-      return null;
-    }
-    
-    const events = await response.json();
-    const event = events?.[0] || null;
-    
-    // If no event found, cache this as a "failure" too
-    if (!event) {
-      failedSlugCache.add(`event:${slug}`);
-      failedSlugTimestamps.set(`event:${slug}`, Date.now());
-    }
-    
-    return event;
-  } catch {
-    // Network errors - cache temporarily to avoid rapid retries
-    failedSlugCache.add(`event:${slug}`);
-    failedSlugTimestamps.set(`event:${slug}`, Date.now());
-    return null;
-  }
-}
-
-/**
  * Get complete market data for a specific game using the slug-based API
  * Returns moneyline, spread, and total markets with proper odds percentages
+ * 
+ * Uses Polymarket's event slug format: nba-{away}-{home}-{YYYY-MM-DD}
+ * Example: nba-por-was-2026-01-27 for Trail Blazers @ Wizards on Jan 27, 2026
  */
 export async function getGameMarketData(
   homeTeam: { name: string; market?: string; alias: string },
@@ -1047,91 +1029,23 @@ export async function getGameMarketData(
   // Use provided date or default to today
   const date = gameDate || new Date();
   
-  // Build the slug
+  // Build the game event slug (format: nba-{away}-{home}-{date})
   const slug = buildGameSlug(homeTeam, awayTeam, date);
   
-  // Try to fetch the moneyline market first (fastest)
-  const moneylineMarket = await fetchMarketBySlug(slug);
+  // Try to fetch the game event by slug (primary method)
+  // This uses the events endpoint: /events?slug=nba-por-was-2026-01-27
+  let event = await fetchGameEventBySlug(slug);
   
-  if (!moneylineMarket) {
-    // Fallback to event-based search
-    const event = await findGameEvent(homeTeam, awayTeam);
+  if (!event) {
+    // Fallback to title-based search through all NBA events
+    event = await findGameEvent(homeTeam, awayTeam);
     if (!event) {
       return null;
     }
-    return parseGameMarkets(event);
   }
   
-  // Parse the moneyline market data
-  const parsedMoneyline = parseMarketData(moneylineMarket);
-  
-  // Build the result with moneyline data
-  const result: GameMarketData = {
-    eventId: moneylineMarket.id,
-    eventTitle: moneylineMarket.question || `${awayTeam.alias} @ ${homeTeam.alias}`,
-    eventSlug: slug,
-    totalVolume: parseFloat(String(moneylineMarket.volume)) || 0,
-    moneyline: parsedMoneyline ? {
-      type: 'MONEYLINE',
-      question: moneylineMarket.question || '',
-      outcomes: parsedMoneyline.outcomes,
-      volume: parseFloat(String(moneylineMarket.volume)) || 0,
-      bestBid: moneylineMarket.bestBid ?? null,
-      bestAsk: moneylineMarket.bestAsk ?? null,
-      marketId: moneylineMarket.id,
-    } : null,
-    spreads: [],
-    totals: [],
-    props: [],
-    lastUpdated: new Date(),
-  };
-  
-  // Try to fetch the full event to get spread/total markets
-  const eventSlug = `nba-series-${awayTeam.alias.toLowerCase()}-${homeTeam.alias.toLowerCase()}-${date.toISOString().split('T')[0]}`;
-  const event = await fetchEventBySlug(eventSlug);
-  
-  if (event?.markets) {
-    for (const market of event.markets) {
-      const parsed = parseMarketData(market);
-      if (!parsed) continue;
-      
-      const marketType = determineMarketType(market.question);
-      const line = extractLine(market.question);
-      
-      const gameMarket: ParsedGameMarket = {
-        type: marketType,
-        question: market.question,
-        outcomes: parsed.outcomes,
-        volume: parseFloat(market.volume || '0'),
-        bestBid: market.bestBid ?? null,
-        bestAsk: market.bestAsk ?? null,
-        line,
-        marketId: market.id,
-      };
-      
-      switch (marketType) {
-        case 'SPREAD':
-          result.spreads.push(gameMarket);
-          break;
-        case 'TOTAL':
-          result.totals.push(gameMarket);
-          break;
-        case 'PROP':
-          result.props.push(gameMarket);
-          break;
-      }
-    }
-    
-    // Sort by volume
-    result.spreads.sort((a, b) => b.volume - a.volume);
-    result.totals.sort((a, b) => b.volume - a.volume);
-    result.props.sort((a, b) => b.volume - a.volume);
-    
-    // Update total volume
-    result.totalVolume = parseFloat(String(event.volume)) || result.totalVolume;
-  }
-  
-  return result;
+  // Parse all markets from the event
+  return parseGameMarkets(event);
 }
 
 /**

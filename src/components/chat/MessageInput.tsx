@@ -37,7 +37,7 @@ export function MessageInput({ onSend, disabled, placeholder = 'Type a message..
   }, [text]);
 
   return (
-    <div className="border-t border-border p-4 bg-background">
+    <div className="border-t border-border py-4 px-4 bg-background">
       <div className="flex gap-2 items-end">
         <textarea
           ref={textareaRef}

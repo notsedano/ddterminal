@@ -442,6 +442,24 @@ export interface NBASeasonSchedule {
 }
 
 /**
+ * Player stats structure for team seasonal statistics
+ * Different from boxscore player stats - uses average/total instead of statistics
+ */
+export interface NBASeasonPlayerStats {
+  id: string;
+  sr_id?: string;
+  full_name: string;
+  first_name: string;
+  last_name: string;
+  position?: string;
+  primary_position?: string;
+  jersey_number?: string;
+  // Season stats are in average/total, not statistics
+  average?: NBAPlayerStatistics;
+  total?: NBAPlayerStatistics;
+}
+
+/**
  * Team seasonal statistics
  */
 export interface NBATeamSeasonalStats {
@@ -451,7 +469,7 @@ export interface NBATeamSeasonalStats {
   alias: string;
   own_record: { wins: number; losses: number };
   opponents?: NBATeamStatistics;
-  players?: NBAPlayerStats[];
+  players?: NBASeasonPlayerStats[];
   statistics: {
     totals: NBATeamStatistics;
     average: NBATeamStatistics;

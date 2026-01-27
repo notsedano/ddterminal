@@ -10,7 +10,8 @@ export interface SocketEventHandlers {
   onDisconnected?: () => void;
 }
 
-const DEBUG = false; // Set to true for WebSocket connection debugging
+// Set to true for detailed Socket.IO debugging (very verbose)
+const DEBUG = false;
 
 function debugLog(context: string, message: string, data?: unknown): void {
   if (DEBUG) {
@@ -27,6 +28,7 @@ class ElizaSocketClient {
   private socket: Socket | null = null;
   private url: string;
   private isConnected = false;
+  private hasLoggedUpgradeError = false; // Only log WebSocket upgrade error once
 
   constructor(url: string) {
     this.url = url;
@@ -42,9 +44,14 @@ class ElizaSocketClient {
       roomId 
     });
 
-    this.socket = io(this.url, {
+    // Use polling first, then upgrade to websocket if available
+    // This works around reverse proxy issues where WebSocket upgrade fails
+    // but polling works fine (common with elizaCloud/similar platforms)
+    const socketOptions = {
       path: '/socket.io',
-      transports: ['websocket'],
+      // Start with polling, then try to upgrade to websocket
+      // This is more reliable than websocket-first when proxies are involved
+      transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
@@ -57,11 +64,49 @@ class ElizaSocketClient {
       auth: {
         entityId: agentId,
       },
+      // Try to upgrade from polling to websocket (may fail, that's OK)
+      upgrade: true,
+      rememberUpgrade: false,
+      forceNew: false,
+      autoConnect: true,
+    };
+
+    debugLog('Connect', 'Socket.IO options:', socketOptions);
+
+    this.socket = io(this.url, socketOptions);
+
+    // Track transport for logging
+    this.socket.io.on('open', () => {
+      debugLog('Manager', 'Socket.IO manager opened');
+      
+      const engine = this.socket?.io?.engine;
+      if (engine) {
+        // Listen for successful upgrade to websocket
+        engine.on('upgrade', () => {
+          console.log('[Socket.IO] ✅ Upgraded to WebSocket transport');
+        });
+
+        // Listen for upgrade errors (expected when proxy doesn't support WebSocket)
+        engine.on('upgradeError', () => {
+          // Only log once to reduce noise
+          if (!this.hasLoggedUpgradeError) {
+            this.hasLoggedUpgradeError = true;
+            console.log('[Socket.IO] ℹ️ WebSocket upgrade unavailable, using polling (this is normal for some hosting providers)');
+          }
+        });
+      }
     });
 
     this.socket.on('connect', () => {
+      const transport = this.socket?.io?.engine?.transport?.name || 'unknown';
+      console.log(`[Socket.IO] ✅ Connected via ${transport}`, {
+        socketId: this.socket?.id,
+        transport
+      });
       debugLog('Event', '✅ CONNECTED!', { socketId: this.socket?.id });
       this.isConnected = true;
+      
+      // Emit join event
       debugLog('Event', 'Emitting join event...', { agentId, roomId });
       this.socket?.emit('join', {
         agentId,
@@ -71,15 +116,16 @@ class ElizaSocketClient {
     });
 
     this.socket.on('connect_error', (error: Error) => {
+      // Don't spam console with expected errors
       debugLog('Event', '❌ CONNECTION ERROR', { 
         message: error.message,
         name: error.name,
-        stack: error.stack
       });
       handlers.onError?.(error);
     });
 
     this.socket.on('disconnect', (reason: string) => {
+      console.log('[Socket.IO] Disconnected:', reason);
       debugLog('Event', '⚠️ DISCONNECTED', { reason });
       this.isConnected = false;
       handlers.onDisconnected?.();
@@ -111,13 +157,16 @@ class ElizaSocketClient {
     });
 
     this.socket.on('reconnect_failed', () => {
+      console.warn('[Socket.IO] Reconnection failed after all attempts');
       debugLog('Event', '❌ RECONNECT FAILED - giving up');
     });
 
     this.socket.on('reconnect', (attemptNumber: number) => {
+      console.log('[Socket.IO] ✅ Reconnected after', attemptNumber, 'attempts');
       debugLog('Event', '✅ RECONNECTED', { attemptNumber });
     });
 
+    // Listen for manager-level errors (usually network issues)
     this.socket.io.on('error', (error: Error) => {
       debugLog('Manager', '❌ MANAGER ERROR', { 
         message: error.message,
@@ -151,6 +200,7 @@ class ElizaSocketClient {
       this.socket.disconnect();
       this.socket = null;
       this.isConnected = false;
+      this.hasLoggedUpgradeError = false; // Reset for next connection
       debugLog('Disconnect', 'Disconnected successfully');
     }
   }

@@ -838,21 +838,26 @@ export function matchPolymarketToGame(
   homeTeam: { name: string; market: string; alias: string },
   awayTeam: { name: string; market: string; alias: string }
 ): boolean {
+  // Safety check for required fields
+  if (!event?.title || !homeTeam?.name || !awayTeam?.name) {
+    return false;
+  }
+
   const title = event.title.toLowerCase();
   
   const homeIdentifiers = [
-    homeTeam.name.toLowerCase(),
-    homeTeam.market.toLowerCase(),
-    homeTeam.alias.toLowerCase(),
-    `${homeTeam.market} ${homeTeam.name}`.toLowerCase(),
-  ];
+    homeTeam.name?.toLowerCase(),
+    homeTeam.market?.toLowerCase(),
+    homeTeam.alias?.toLowerCase(),
+    homeTeam.market && homeTeam.name ? `${homeTeam.market} ${homeTeam.name}`.toLowerCase() : null,
+  ].filter((id): id is string => Boolean(id));
   
   const awayIdentifiers = [
-    awayTeam.name.toLowerCase(),
-    awayTeam.market.toLowerCase(),
-    awayTeam.alias.toLowerCase(),
-    `${awayTeam.market} ${awayTeam.name}`.toLowerCase(),
-  ];
+    awayTeam.name?.toLowerCase(),
+    awayTeam.market?.toLowerCase(),
+    awayTeam.alias?.toLowerCase(),
+    awayTeam.market && awayTeam.name ? `${awayTeam.market} ${awayTeam.name}`.toLowerCase() : null,
+  ].filter((id): id is string => Boolean(id));
 
   const hasHome = homeIdentifiers.some(id => title.includes(id));
   const hasAway = awayIdentifiers.some(id => title.includes(id));
@@ -867,9 +872,14 @@ export function extractWinProbability(
   market: PolymarketSportsMarket,
   teamName: string
 ): number | null {
+  if (!teamName || !market?.market?.outcomes) {
+    return null;
+  }
+
   const teamLower = teamName.toLowerCase();
   
   for (const outcome of market.market.outcomes) {
+    if (!outcome?.name) continue;
     const outcomeLower = outcome.name.toLowerCase();
     if (outcomeLower.includes(teamLower) || outcomeLower === 'yes') {
       return outcome.price;

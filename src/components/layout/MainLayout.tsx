@@ -4,18 +4,16 @@ import { ChatContainer } from '@/components/chat/ChatContainer';
 import { TerminalPanel } from '@/components/terminal/TerminalPanel';
 import { MatchPanel } from '@/components/match-panel';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useCreateSession, useSession } from '@/hooks/useSession';
+import { useSession } from '@/hooks/useSession';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNBASchedule } from '@/hooks/useNBASchedule';
 import { cn } from '@/utils/cn';
+import { MatchupSessionProvider } from '@/contexts/MatchupSessionContext';
+import type { Session } from '@/types';
 
 export interface MainLayoutProps {
   agentId: string;
 }
-
-// Constants for retry logic
-const MAX_RETRY_ATTEMPTS = 3;
-const INITIAL_RETRY_DELAY = 2000; // 2 seconds
 
 export function MainLayout({ agentId }: MainLayoutProps) {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -23,45 +21,26 @@ export function MainLayout({ agentId }: MainLayoutProps) {
   const [showTerminal, setShowTerminal] = useState(false);
   const [showMatchPanel, setShowMatchPanel] = useState(true); // Default expanded
   const [terminalHeight, setTerminalHeight] = useState(300);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [retryCount, setRetryCount] = useState(0);
-  const createSession = useCreateSession();
   const { data: session } = useSession(currentSessionId);
   const queryClient = useQueryClient();
   const hasCreatedSession = useRef(false);
   const isResizing = useRef(false);
   const terminalResizeRef = useRef<HTMLDivElement>(null);
-  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // Get live game status for header indicator
   const { liveGames } = useNBASchedule({ autoRefreshLive: showMatchPanel });
 
-  // Cleanup retry timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (retryTimeoutRef.current) {
-        clearTimeout(retryTimeoutRef.current);
-      }
-    };
-  }, []);
-
   useEffect(() => {
     if (session) {
       setRoomId(session.channelId || session.sessionId);
-      setConnectionError(null); // Clear error on successful session
     }
   }, [session]);
 
-  const handleRetry = useCallback(() => {
-    setConnectionError(null);
-    setRetryCount(0);
-    hasCreatedSession.current = false;
-  }, []);
-
+  // Load existing session from storage on mount (NO auto-creation)
   useEffect(() => {
-    if (currentSessionId || !agentId || hasCreatedSession.current || createSession.isPending) return;
+    if (currentSessionId || !agentId || hasCreatedSession.current) return;
     
-    const initializeSession = async () => {
+    const loadExistingSession = async () => {
       try {
         const { getAllSessions } = await import('@/services/storage/conversationStorage');
         const { getUserId } = await import('@/utils/storage');
@@ -72,56 +51,15 @@ export function MainLayout({ agentId }: MainLayoutProps) {
           setCurrentSessionId(latestSession.sessionId);
           setRoomId(latestSession.channelId);
           hasCreatedSession.current = true;
-          setConnectionError(null);
-          return;
         }
+        // If no sessions exist, just show empty state - user can click "New Session"
       } catch (error) {
         console.error('Error checking existing sessions:', error);
       }
-      
-      // No existing sessions, create a new one
-      hasCreatedSession.current = true;
-      createSession.mutate(
-        { agentId },
-        {
-          onSuccess: (newSession) => {
-            setCurrentSessionId(newSession.sessionId);
-            setRoomId(newSession.channelId);
-            setConnectionError(null);
-            setRetryCount(0);
-          },
-          onError: (error) => {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            
-            // Check if we should retry
-            if (retryCount < MAX_RETRY_ATTEMPTS) {
-              const nextRetryCount = retryCount + 1;
-              const delay = INITIAL_RETRY_DELAY * Math.pow(2, retryCount); // Exponential backoff
-              
-              console.warn(`Session creation failed (attempt ${nextRetryCount}/${MAX_RETRY_ATTEMPTS}). Retrying in ${delay}ms...`);
-              
-              retryTimeoutRef.current = setTimeout(() => {
-                setRetryCount(nextRetryCount);
-                hasCreatedSession.current = false; // Allow retry
-              }, delay);
-            } else {
-              // Max retries reached, show error
-              console.error('Session creation failed after max retries:', errorMessage);
-              setConnectionError(
-                errorMessage.includes('404') || errorMessage.includes('Not found')
-                  ? 'Backend API not available. The Sessions API endpoint returned 404. Please check that the elizaOS backend is running and supports the Sessions API.'
-                  : errorMessage.includes('Network')
-                    ? 'Cannot connect to backend. Please check your network connection and that the backend server is running.'
-                    : `Failed to create session: ${errorMessage}`
-              );
-            }
-          },
-        }
-      );
     };
     
-    initializeSession();
-  }, [currentSessionId, agentId, createSession, retryCount]);
+    loadExistingSession();
+  }, [currentSessionId, agentId]);
 
   const handleSessionSelect = async (sessionId: string) => {
     setCurrentSessionId(sessionId);
@@ -143,6 +81,13 @@ export function MainLayout({ agentId }: MainLayoutProps) {
       setRoomId(session?.channelId || sessionId);
       if (session) await storage.saveSession(session);
     } catch (error) {
+      // If session not found, mark it as invalid
+      const { SessionNotFoundError } = await import('@/services/api/client');
+      if (error instanceof SessionNotFoundError) {
+        console.warn(`[MainLayout] Session ${sessionId.slice(0, 8)}... not found on backend`);
+        handleSessionInvalid(sessionId);
+        return;
+      }
       console.error('Error fetching session from API:', error);
       setRoomId(sessionId); // Fallback to sessionId
     }
@@ -158,11 +103,10 @@ export function MainLayout({ agentId }: MainLayoutProps) {
     queryClient.removeQueries({ queryKey: ['messages', invalidSessionId] });
     queryClient.invalidateQueries({ queryKey: ['sessions'] });
     
-    // If this was the current session, clear it and trigger retry logic
+    // If this was the current session, clear it
     if (currentSessionId === invalidSessionId) {
       setCurrentSessionId(null);
       setRoomId(null);
-      setRetryCount(0); // Reset retry count for new attempt
       hasCreatedSession.current = false;
     }
   };
@@ -196,7 +140,15 @@ export function MainLayout({ agentId }: MainLayoutProps) {
     isResizing.current = true;
   };
 
+  // Handle when a matchup session is started from MatchPanel
+  const handleMatchupSessionStarted = useCallback((session: Session) => {
+    setCurrentSessionId(session.sessionId);
+    setRoomId(session.channelId || session.sessionId);
+    hasCreatedSession.current = true;
+  }, []);
+
   return (
+    <MatchupSessionProvider agentId={agentId} onSessionStarted={handleMatchupSessionStarted}>
     <div className="h-screen flex flex-col bg-background text-foreground hud-scanlines relative">
       {/* HUD Background Overlay */}
       <div className="hud-bg-overlay" />
@@ -208,102 +160,69 @@ export function MainLayout({ agentId }: MainLayoutProps) {
         onToggleMatchPanel={() => setShowMatchPanel(!showMatchPanel)}
         hasLiveGames={liveGames.length > 0}
       />
-      <div className="flex-1 flex overflow-hidden relative z-10">
-        <Sidebar
-          currentSessionId={currentSessionId}
-          onSessionSelect={handleSessionSelect}
-          agentId={agentId}
-        />
-        <main className="flex-1 flex flex-col overflow-hidden relative">
-          <div className="flex-1 flex overflow-hidden">
-            {/* Main content area */}
-            <div
-              className={cn('flex-1 flex flex-col overflow-hidden', showTerminal && 'pb-0')}
-              style={showTerminal ? { height: `calc(100% - ${terminalHeight}px)` } : undefined}
-            >
-              {currentSessionId ? (
-                <ChatContainer
-                  sessionId={currentSessionId}
-                  agentId={agentId}
-                  roomId={roomId || currentSessionId} // Fallback to sessionId if roomId not available
-                  onSessionInvalid={handleSessionInvalid}
-                />
-              ) : connectionError ? (
-                <div className="flex-1 flex flex-col items-center justify-center text-center p-8 gap-4">
-                  <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center">
-                    <svg 
-                      className="w-8 h-8 text-destructive" 
-                      fill="none" 
-                      stroke="currentColor" 
-                      viewBox="0 0 24 24"
-                    >
-                      <path 
-                        strokeLinecap="round" 
-                        strokeLinejoin="round" 
-                        strokeWidth={2} 
-                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" 
-                      />
-                    </svg>
+      <div className="flex-1 flex flex-col overflow-hidden relative z-10">
+        <div className="flex-1 flex overflow-hidden">
+          <Sidebar
+            currentSessionId={currentSessionId}
+            onSessionSelect={handleSessionSelect}
+            agentId={agentId}
+          />
+          <main className="flex-1 flex flex-col overflow-hidden relative">
+            <div className="flex-1 flex overflow-hidden">
+              {/* Main content area */}
+              <div
+                className={cn('flex-1 flex flex-col overflow-hidden', showTerminal && 'pb-0')}
+                style={showTerminal ? { height: `calc(100% - ${terminalHeight}px)` } : undefined}
+              >
+                {currentSessionId ? (
+                  <ChatContainer
+                    sessionId={currentSessionId}
+                    agentId={agentId}
+                    roomId={roomId || currentSessionId} // Fallback to sessionId if roomId not available
+                    onSessionInvalid={handleSessionInvalid}
+                    showMessageInput={true}
+                  />
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-2">
+                    <span>Select a session or create a new one</span>
                   </div>
-                  <div className="max-w-md space-y-2">
-                    <h3 className="text-lg font-semibold text-foreground">Connection Error</h3>
-                    <p className="text-sm text-muted-foreground">{connectionError}</p>
-                  </div>
-                  <button
-                    onClick={handleRetry}
-                    className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
-                  >
-                    Retry Connection
-                  </button>
-                  <p className="text-xs text-muted-foreground mt-2">
-                    Attempted {retryCount} of {MAX_RETRY_ATTEMPTS} retries
-                  </p>
-                </div>
-              ) : (
-                <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-2">
-                  {createSession.isPending ? (
-                    <>
-                      <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                      <span>Creating session{retryCount > 0 ? ` (retry ${retryCount}/${MAX_RETRY_ATTEMPTS})` : '...'}</span>
-                    </>
-                  ) : (
-                    'Select a session or create a new one'
-                  )}
-                </div>
+                )}
+              </div>
+              
+              {/* Match Panel (upper-right) */}
+              {showMatchPanel && (
+                <MatchPanel defaultExpanded={true} />
               )}
             </div>
             
-            {/* Match Panel (upper-right) */}
-            {showMatchPanel && (
-              <MatchPanel defaultExpanded={true} />
-            )}
-          </div>
-          
-          {showTerminal && (
-            <>
-              <div
-                ref={terminalResizeRef}
-                className="h-1 bg-border hover:bg-primary cursor-row-resize transition-colors"
-                onMouseDown={handleResizeStart}
-                style={{ height: '4px' }}
-              />
-              <div style={{ height: `${terminalHeight}px` }} className="flex-shrink-0">
-                <TerminalPanel
-                  welcomeMessage="Agent Daredevil Terminal\nType commands or interact with the agent here:"
-                  prompt="$ "
-                  onCommand={(command) => {
-                    console.log('Terminal command:', command);
-                    // You can integrate this with your agent or execute commands here
-                  }}
+            {showTerminal && (
+              <>
+                <div
+                  ref={terminalResizeRef}
+                  className="h-1 bg-border hover:bg-primary cursor-row-resize transition-colors"
+                  onMouseDown={handleResizeStart}
+                  style={{ height: '4px' }}
                 />
-              </div>
-            </>
-          )}
-        </main>
+                <div style={{ height: `${terminalHeight}px` }} className="flex-shrink-0">
+                  <TerminalPanel
+                    welcomeMessage="Agent Daredevil Terminal\nType commands or interact with the agent here:"
+                    prompt="$ "
+                    onCommand={(command) => {
+                      console.log('Terminal command:', command);
+                      // You can integrate this with your agent or execute commands here
+                    }}
+                  />
+                </div>
+              </>
+            )}
+          </main>
+        </div>
+        
       </div>
       
       {/* Mobile Match Panel (rendered outside main layout for full-screen overlay) */}
       {!showMatchPanel && <MatchPanel defaultExpanded={false} />}
     </div>
+    </MatchupSessionProvider>
   );
 }

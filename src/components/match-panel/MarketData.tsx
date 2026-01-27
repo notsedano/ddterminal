@@ -330,6 +330,7 @@ export function CompactMarketData({ market, className }: CompactMarketDataProps)
 
 /**
  * Odds Bar visualization
+ * Always shows higher percentage (favorite) on the left in green
  */
 interface OddsBarProps {
   outcomes: Array<{ name: string; price: number }>;
@@ -340,25 +341,27 @@ interface OddsBarProps {
 export function OddsBar({ outcomes, className, showLabels = false }: OddsBarProps) {
   if (outcomes.length < 2) return null;
 
-  const yesPrice = outcomes[0]?.price ?? 0.5;
-  const noPrice = outcomes[1]?.price ?? 0.5;
+  // Sort to ensure favorite (higher %) is always on the left
+  const sorted = [...outcomes].sort((a, b) => b.price - a.price);
+  const favoritePrice = sorted[0]?.price ?? 0.5;
+  const underdogPrice = sorted[1]?.price ?? 0.5;
 
   return (
     <div className={cn('space-y-1', className)}>
       {showLabels && (
         <div className="flex justify-between text-[10px] text-muted-foreground">
-          <span>{outcomes[0]?.name}</span>
-          <span>{outcomes[1]?.name}</span>
+          <span>{sorted[0]?.name}</span>
+          <span>{sorted[1]?.name}</span>
         </div>
       )}
       <div className="w-full h-2 rounded-full overflow-hidden flex">
         <div
           className="h-full bg-green-500 transition-all duration-300"
-          style={{ width: `${yesPrice * 100}%` }}
+          style={{ width: `${favoritePrice * 100}%` }}
         />
         <div
           className="h-full bg-red-500 transition-all duration-300"
-          style={{ width: `${noPrice * 100}%` }}
+          style={{ width: `${underdogPrice * 100}%` }}
         />
       </div>
     </div>
@@ -367,6 +370,7 @@ export function OddsBar({ outcomes, className, showLabels = false }: OddsBarProp
 
 /**
  * Enhanced Odds Bar with price labels
+ * Always shows higher percentage (favorite) on the left in green
  */
 interface EnhancedOddsBarProps {
   outcomes: Array<{ name: string; price: number }>;
@@ -376,27 +380,29 @@ interface EnhancedOddsBarProps {
 export function EnhancedOddsBar({ outcomes, className }: EnhancedOddsBarProps) {
   if (outcomes.length < 2) return null;
 
-  const yesPrice = outcomes[0]?.price ?? 0.5;
-  const noPrice = outcomes[1]?.price ?? 0.5;
+  // Sort to ensure favorite (higher %) is always on the left
+  const sorted = [...outcomes].sort((a, b) => b.price - a.price);
+  const favoritePrice = sorted[0]?.price ?? 0.5;
+  const underdogPrice = sorted[1]?.price ?? 0.5;
 
   return (
     <div className={cn('space-y-1', className)}>
       <div className="flex justify-between text-[10px]">
         <span className="text-green-400 font-medium">
-          {outcomes[0]?.name}: {formatPriceAsPercentage(yesPrice)}
+          {sorted[0]?.name}: {formatPriceAsPercentage(favoritePrice)}
         </span>
         <span className="text-red-400 font-medium">
-          {outcomes[1]?.name}: {formatPriceAsPercentage(noPrice)}
+          {sorted[1]?.name}: {formatPriceAsPercentage(underdogPrice)}
         </span>
       </div>
       <div className="relative w-full h-3 rounded-full overflow-hidden flex">
         <div
           className="h-full bg-green-500 transition-all duration-500 ease-out"
-          style={{ width: `${yesPrice * 100}%` }}
+          style={{ width: `${favoritePrice * 100}%` }}
         />
         <div
           className="h-full bg-red-500 transition-all duration-500 ease-out"
-          style={{ width: `${noPrice * 100}%` }}
+          style={{ width: `${underdogPrice * 100}%` }}
         />
         {/* Center marker */}
         <div className="absolute top-0 bottom-0 left-1/2 w-px bg-background/50" />

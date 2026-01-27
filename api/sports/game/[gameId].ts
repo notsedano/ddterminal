@@ -66,6 +66,11 @@ export default async function handler(
     true; // Assume live if no cache
 
   if (isValidCache(cachedEntry, isLikelyLive)) {
+    // Different cache durations based on game status
+    // Live games: 15s cache, Completed: 5 minutes
+    const cacheSeconds = isLikelyLive ? 15 : 300;
+    const revalidateSeconds = isLikelyLive ? 30 : 600;
+    res.setHeader('Cache-Control', `s-maxage=${cacheSeconds}, stale-while-revalidate=${revalidateSeconds}`);
     return res.status(200).json({
       success: true,
       data: cachedEntry.data,
@@ -115,6 +120,12 @@ export default async function handler(
     timestamp: Date.now(),
   });
 
+  // Determine cache duration based on game status
+  const isLive = isGameStatusLive(data.status);
+  const cacheSeconds = isLive ? 15 : 300;
+  const revalidateSeconds = isLive ? 30 : 600;
+  res.setHeader('Cache-Control', `s-maxage=${cacheSeconds}, stale-while-revalidate=${revalidateSeconds}`);
+  
   return res.status(200).json({
     success: true,
     data,

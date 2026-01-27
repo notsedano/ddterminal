@@ -1,25 +1,32 @@
-# Backend WebSocket 502 Error - Troubleshooting Guide
+# Backend WebSocket Connection Guide
 
 ## Status
-**Last tested:** January 25, 2026  
-**Result:** ✅ **CONNECTED SUCCESSFULLY**  
-**Frontend Status:** Working - WebSocket real-time connection established
+**Last tested:** January 27, 2026  
+**Result:** ✅ **CONNECTED VIA POLLING**  
+**Frontend Status:** Working - Real-time connection established via HTTP long-polling
 
-## Working Frontend Implementation
-The frontend WebSocket implementation is now working correctly:
-- Socket.IO client connects to: `wss://3a6615a6-aeris-agent.containers.elizacloud.ai/socket.io/`
-- Using path `/socket.io` (Socket.IO default path - works with elizaCloud reverse proxy)
-- Using WebSocket transport only (no polling)
+## Current Implementation
+
+The frontend uses Socket.IO with **polling transport** as the primary method, with WebSocket upgrade as optional:
+
+- Socket.IO client connects to: `https://3a6615a6-aeris-agent.containers.elizacloud.ai/socket.io/`
+- **Primary transport:** HTTP long-polling (reliable, works through all proxies)
+- **Optional upgrade:** WebSocket (fails on elizaCloud due to proxy configuration)
 - **Key:** Must pass `entityId` (agentId) in both `query` and `auth` options
-- Debug logging available by setting `DEBUG = true` in:
-  - `src/services/websocket/socketClient.ts`
-  - `src/hooks/useSocket.ts`
 
-### Working Connection Configuration
+### Why Polling Instead of WebSocket?
+
+The elizaCloud reverse proxy does not forward WebSocket upgrade headers, causing WebSocket connections to fail immediately. However, HTTP long-polling works perfectly and provides the same real-time functionality with slightly higher latency.
+
+**Evidence:**
+- `https://...elizacloud.ai/socket.io/?EIO=4&transport=polling` — Returns valid Socket.IO handshake
+- `wss://...elizacloud.ai/socket.io/?EIO=4&transport=websocket` — Fails with "closed before established"
+
+### Current Connection Configuration
 ```javascript
 this.socket = io(this.url, {
   path: '/socket.io',
-  transports: ['websocket'],
+  transports: ['polling', 'websocket'], // Polling first, then try upgrade
   reconnection: true,
   reconnectionAttempts: 5,
   reconnectionDelay: 1000,
@@ -32,13 +39,13 @@ this.socket = io(this.url, {
   auth: {
     entityId: agentId,
   },
+  upgrade: true, // Try to upgrade to WebSocket (may fail, that's OK)
 });
 ```
 
-## Problem (Resolved)
-Previously, frontend was receiving `502 Bad Gateway` errors when using custom `/ws` path.
+## How to Enable True WebSocket (Infrastructure Change Required)
 
-**Solution:** Switched to Socket.IO's default `/socket.io` path which works with elizaCloud's reverse proxy without additional configuration.
+To enable WebSocket transport, the elizaCloud reverse proxy needs to be configured with WebSocket upgrade headers. This cannot be done from the frontend.
 
 Previous error (now resolved):
 ```

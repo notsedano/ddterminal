@@ -23,10 +23,15 @@ interface PriceCache {
 }
 
 let priceCache: PriceCache | null = null;
-const PRICE_CACHE_TTL = 5000; // 5 seconds - very short for pricing data
+const PRICE_CACHE_TTL = 10000; // 10 seconds - balance between freshness and rate limiting
 
-// Track if we've already logged the price endpoint warning to avoid console spam
-let hasPriceEndpointWarned = false;
+// Track warnings to avoid console spam
+let lastPriceWarningTime = 0;
+const WARNING_COOLDOWN_MS = 60000; // Only warn once per minute
+
+// Track consecutive failures for backoff
+let consecutiveFailures = 0;
+const MAX_BACKOFF_FAILURES = 5;
 
 /**
  * Get current price for a single token
@@ -34,31 +39,32 @@ let hasPriceEndpointWarned = false;
  * @deprecated Use getTokenPrices for batch requests - individual endpoint may not exist
  */
 export async function getTokenPrice(tokenId: string, side: 'buy' | 'sell' = 'buy'): Promise<number> {
-  try {
-    const response = await fetch(
-      `${CLOB_API}/price?token_id=${encodeURIComponent(tokenId)}&side=${side}`,
-      { headers: { 'Accept': 'application/json' } }
-    );
-
-    if (!response.ok) {
-      // If 404, the endpoint doesn't exist - return 0 silently (log only once)
-      if (response.status === 404) {
-        if (!hasPriceEndpointWarned) {
-          hasPriceEndpointWarned = true;
-          console.warn('Polymarket /price endpoint not found (404). Individual price fetching disabled.');
-        }
-        return 0;
-      }
-      // For other errors, just return 0 silently to avoid console spam
-      return 0;
-    }
-
-    const data = await response.json();
-    return parseFloat(data.price) || 0;
-  } catch {
-    // Silently return 0 for any errors to prevent console spam
-    return 0;
+  // Check if we have a cached price
+  if (priceCache && Date.now() - priceCache.timestamp < PRICE_CACHE_TTL) {
+    const cached = priceCache.prices.get(tokenId);
+    if (cached !== undefined) return cached;
   }
+
+  const response = await fetch(
+    `${CLOB_API}/price?token_id=${encodeURIComponent(tokenId)}&side=${side}`,
+    { headers: { 'Accept': 'application/json' } }
+  ).catch(() => null);
+
+  if (!response || !response.ok) {
+    // Return cached price if available, otherwise 0
+    return priceCache?.prices.get(tokenId) ?? 0;
+  }
+
+  const data = await response.json();
+  const price = parseFloat(data.price) || 0;
+  
+  // Update cache
+  if (!priceCache) {
+    priceCache = { prices: new Map(), timestamp: Date.now() };
+  }
+  priceCache.prices.set(tokenId, price);
+  
+  return price;
 }
 
 /**
@@ -87,7 +93,25 @@ export async function getTokenPrices(tokenIds: string[]): Promise<Map<string, nu
     return new Map();
   }
 
-  // Check cache
+  // If we've had too many consecutive failures, use cache and skip API call
+  if (consecutiveFailures >= MAX_BACKOFF_FAILURES) {
+    const prices = new Map<string, number>();
+    if (priceCache) {
+      for (const tokenId of tokenIds) {
+        const cachedPrice = priceCache.prices.get(tokenId);
+        if (cachedPrice !== undefined) {
+          prices.set(tokenId, cachedPrice);
+        }
+      }
+    }
+    // Reset after a longer cooldown
+    if (Date.now() - lastPriceWarningTime > WARNING_COOLDOWN_MS * 2) {
+      consecutiveFailures = 0;
+    }
+    return prices;
+  }
+
+  // Check cache - if fresh enough, use it
   if (priceCache && Date.now() - priceCache.timestamp < PRICE_CACHE_TTL) {
     const allCached = tokenIds.every(id => priceCache!.prices.has(id));
     if (allCached) {
@@ -100,15 +124,27 @@ export async function getTokenPrices(tokenIds: string[]): Promise<Map<string, nu
   }
 
   // Batch request using the /prices endpoint
-  const tokenIdsParam = tokenIds.join(',');
+  // Limit token IDs to prevent URL length issues (400 error)
+  const MAX_TOKENS_PER_REQUEST = 20;
+  const limitedTokenIds = tokenIds.slice(0, MAX_TOKENS_PER_REQUEST);
+  const tokenIdsParam = limitedTokenIds.join(',');
+  
   const response = await fetch(
     `${CLOB_API}/prices?token_ids=${encodeURIComponent(tokenIdsParam)}`,
     { headers: { 'Accept': 'application/json' } }
-  );
+  ).catch(() => null);
 
-  if (!response.ok) {
-    // For ANY error (404, 500, etc.), return cached prices or empty map
-    // Do NOT fallback to individual /price calls as that endpoint also doesn't exist
+  if (!response || !response.ok) {
+    consecutiveFailures++;
+    
+    // Only log warning occasionally to avoid spam
+    const now = Date.now();
+    if (now - lastPriceWarningTime > WARNING_COOLDOWN_MS) {
+      lastPriceWarningTime = now;
+      console.warn(`Polymarket price API unavailable (${response?.status || 'network error'}). Using cached prices.`);
+    }
+    
+    // Return cached prices
     const prices = new Map<string, number>();
     if (priceCache) {
       for (const tokenId of tokenIds) {
@@ -118,18 +154,16 @@ export async function getTokenPrices(tokenIds: string[]): Promise<Map<string, nu
         }
       }
     }
-    // Only log once to avoid console spam
-    if (!hasPriceEndpointWarned) {
-      hasPriceEndpointWarned = true;
-      console.warn(`Polymarket price API returned ${response.status}. Using cached prices.`);
-    }
     return prices;
   }
 
+  // Success - reset failure counter
+  consecutiveFailures = 0;
+  
   const data = await response.json();
   const prices = new Map<string, number>();
   
-  for (const tokenId of tokenIds) {
+  for (const tokenId of limitedTokenIds) {
     const priceValue = data[tokenId];
     if (typeof priceValue === 'number') {
       prices.set(tokenId, priceValue);
@@ -140,11 +174,14 @@ export async function getTokenPrices(tokenIds: string[]): Promise<Map<string, nu
     }
   }
 
-  // Update cache
-  priceCache = {
-    prices: new Map([...(priceCache?.prices || new Map()), ...prices]),
-    timestamp: Date.now(),
-  };
+  // Update cache with new prices
+  if (!priceCache) {
+    priceCache = { prices: new Map(), timestamp: Date.now() };
+  }
+  for (const [id, price] of prices) {
+    priceCache.prices.set(id, price);
+  }
+  priceCache.timestamp = Date.now();
 
   return prices;
 }

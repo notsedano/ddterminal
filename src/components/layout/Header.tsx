@@ -1,7 +1,8 @@
 import { Moon, Sun, Terminal as TerminalIcon, Tv } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { AuthButton } from '@/components/auth';
 import { getTheme, setTheme } from '@/utils/storage';
-import { useState, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { cn } from '@/utils/cn';
 
 import logo from '@assets/Full Color@10x.png';
@@ -21,19 +22,13 @@ export function Header({
   onToggleMatchPanel,
   hasLiveGames,
 }: HeaderProps = {}) {
-  const [theme, setThemeState] = useState<'dark' | 'light'>('dark');
-
-  useEffect(() => {
-    const currentTheme = getTheme();
-    setThemeState(currentTheme);
-    setTheme(currentTheme);
-  }, []);
-
-  const toggleTheme = () => {
+  const [theme, setThemeState] = useState<'dark' | 'light'>(() => getTheme());
+  
+  const toggleTheme = useCallback(() => {
     const newTheme = theme === 'dark' ? 'light' : 'dark';
     setThemeState(newTheme);
     setTheme(newTheme);
-  };
+  }, [theme]);
 
   return (
     <header className="hud-border border-b bg-background h-[65px] flex shrink-0 relative z-20">
@@ -45,10 +40,10 @@ export function Header({
             className="h-10 sm:h-11 md:h-12 w-auto max-h-full object-contain object-left"
           />
           <div className="flex flex-col justify-center">
-            <div className="text-white text-base sm:text-lg font-normal">
+            <div className="text-white text-base sm:text-2xl font-normal">
               //DARE TERMINAL
             </div>
-            <div className="text-white text-xs sm:text-sm border border-yellow-400 px-2 py-0.5 mt-1 inline-block">
+            <div className="text-white text-[0.6rem] sm:text-[0.65rem] border border-yellow-400 px-2 py-0.5 mt-1 inline-block">
               early access testnet v.0.1
             </div>
           </div>
@@ -90,6 +85,7 @@ export function Header({
           >
             {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
           </Button>
+          <AuthButton variant="ghost" size="sm" />
         </div>
       </div>
     </header>

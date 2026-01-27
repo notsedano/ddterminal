@@ -69,6 +69,8 @@ export default async function handler(
   const cachedEntry = cache.get(cacheKey);
   
   if (isValidCache(cachedEntry)) {
+    // CDN cache for 1 minute, stale-while-revalidate for 2 minutes
+    res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=120');
     return res.status(200).json(cachedEntry.data);
   }
 
@@ -104,5 +106,11 @@ export default async function handler(
     timestamp: Date.now(),
   });
 
+  // Longer cache for static endpoints (tags, sports metadata)
+  const isStaticEndpoint = apiPath === 'tags' || apiPath === 'sports' || apiPath === 'sports/market-types';
+  const cacheSeconds = isStaticEndpoint ? 3600 : 60; // 1 hour for static, 1 minute for dynamic
+  const revalidateSeconds = isStaticEndpoint ? 7200 : 120;
+  res.setHeader('Cache-Control', `s-maxage=${cacheSeconds}, stale-while-revalidate=${revalidateSeconds}`);
+  
   return res.status(200).json(data);
 }

@@ -169,6 +169,8 @@ export default async function handler(
     })
   );
 
+  // Short CDN cache for live data - 5 seconds max, revalidate for 10s
+  res.setHeader('Cache-Control', 's-maxage=5, stale-while-revalidate=10');
   return res.status(200).json({
     success: true,
     data: {

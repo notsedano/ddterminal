@@ -3,6 +3,7 @@
  * Visualizes bid/ask depth with horizontal bars
  */
 
+import { memo } from 'react';
 import { cn } from '@/utils/cn';
 import type { AggregatedLevel, OrderbookDisplayMetrics } from '@/hooks/usePolymarketOrderbook';
 import { formatSpreadDisplay, formatDepthDisplay, getImbalanceIndicator } from '@/hooks/usePolymarketOrderbook';
@@ -16,9 +17,9 @@ interface OrderbookDepthProps {
 }
 
 /**
- * Full orderbook depth visualization
+ * Full orderbook depth visualization - memoized to prevent re-renders during live updates
  */
-export function OrderbookDepth({ bids, asks, metrics, className, compact = false }: OrderbookDepthProps) {
+export const OrderbookDepth = memo(function OrderbookDepth({ bids, asks, metrics, className, compact = false }: OrderbookDepthProps) {
   if (bids.length === 0 && asks.length === 0) {
     return (
       <div className={cn('flex items-center justify-center py-4 text-xs text-muted-foreground', className)}>
@@ -81,7 +82,7 @@ export function OrderbookDepth({ bids, asks, metrics, className, compact = false
       {metrics && <ImbalanceIndicator imbalance={metrics.imbalance} />}
     </div>
   );
-}
+});
 
 /**
  * Single depth level with horizontal bar
@@ -93,7 +94,10 @@ interface DepthLevelProps {
   side: 'bid' | 'ask';
 }
 
-function DepthLevel({ price, size, percentage, side }: DepthLevelProps) {
+/**
+ * DepthLevel - memoized for stable orderbook entries
+ */
+const DepthLevel = memo(function DepthLevel({ price, size, percentage, side }: DepthLevelProps) {
   const isBid = side === 'bid';
   
   return (
@@ -121,7 +125,7 @@ function DepthLevel({ price, size, percentage, side }: DepthLevelProps) {
       </div>
     </div>
   );
-}
+});
 
 /**
  * Orderbook metrics display
@@ -238,7 +242,10 @@ interface SpreadIndicatorProps {
   className?: string;
 }
 
-export function SpreadIndicator({ spread, className }: SpreadIndicatorProps) {
+/**
+ * SpreadIndicator - memoized for stable spread data
+ */
+export const SpreadIndicator = memo(function SpreadIndicator({ spread, className }: SpreadIndicatorProps) {
   if (spread === null) return null;
 
   const spreadCents = Math.round(spread * 100);
@@ -257,7 +264,7 @@ export function SpreadIndicator({ spread, className }: SpreadIndicatorProps) {
       <span className="text-muted-foreground/70">spread</span>
     </div>
   );
-}
+});
 
 /**
  * Depth summary for compact views
@@ -268,7 +275,10 @@ interface DepthSummaryProps {
   className?: string;
 }
 
-export function DepthSummary({ bidDepth, askDepth, className }: DepthSummaryProps) {
+/**
+ * DepthSummary - memoized for compact views
+ */
+export const DepthSummary = memo(function DepthSummary({ bidDepth, askDepth, className }: DepthSummaryProps) {
   const total = bidDepth + askDepth;
   const bidPercentage = total > 0 ? (bidDepth / total) * 100 : 50;
 
@@ -290,6 +300,6 @@ export function DepthSummary({ bidDepth, askDepth, className }: DepthSummaryProp
       </div>
     </div>
   );
-}
+});
 
 export default OrderbookDepth;
