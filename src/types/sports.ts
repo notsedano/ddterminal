@@ -372,30 +372,39 @@ export interface TeamMatchHistory {
 
 /**
  * Team standing information from standings API
+ * Uses snake_case to match SportRadar API response
  */
 export interface NBATeamStanding {
   id: string;
   name: string;
   market: string;
   alias: string;
+  sr_id?: string;
   wins: number;
   losses: number;
-  winPct: number;
-  pointsFor: number;
-  pointsAgainst: number;
-  pointDiff: number;
-  streak: {
+  win_pct: number;
+  points_for: number;
+  points_against: number;
+  point_diff: number;
+  games_behind?: number;
+  streak?: {
     kind: 'win' | 'loss';
     length: number;
   };
-  homeRecord: { wins: number; losses: number };
-  awayRecord: { wins: number; losses: number };
-  last10: { wins: number; losses: number };
-  conferenceRank: number;
-  divisionRank: number;
-  gamesBack: number;
-  conference: string;
-  division: string;
+  records?: {
+    home?: { wins: number; losses: number };
+    road?: { wins: number; losses: number };
+    last_ten?: { wins: number; losses: number };
+    conference?: { wins: number; losses: number };
+    division?: { wins: number; losses: number };
+  };
+  calc_rank?: {
+    conf_rank?: number;
+    div_rank?: number;
+  };
+  // Added after extraction from standings
+  conference?: string;
+  division?: string;
 }
 
 /**

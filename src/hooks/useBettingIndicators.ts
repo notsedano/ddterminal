@@ -165,8 +165,8 @@ function generateBettingSignals(data: {
   const signals: BettingSignal[] = [];
   const now = new Date();
 
-  // Hot streak signal
-  if (data.homeHistory.streakCount >= 5 && data.homeHistory.streakType === 'W') {
+  // Hot streak signal (5+ game win streak)
+  if (data.homeHistory?.streakCount >= 5 && data.homeHistory?.streakType === 'W') {
     signals.push({
       type: 'sharp_action',
       team: data.homeHistory.teamAlias,
@@ -175,7 +175,7 @@ function generateBettingSignals(data: {
       confidence: 'high',
     });
   }
-  if (data.awayHistory.streakCount >= 5 && data.awayHistory.streakType === 'W') {
+  if (data.awayHistory?.streakCount >= 5 && data.awayHistory?.streakType === 'W') {
     signals.push({
       type: 'sharp_action',
       team: data.awayHistory.teamAlias,
@@ -185,20 +185,20 @@ function generateBettingSignals(data: {
     });
   }
 
-  // Cold streak signal
-  if (data.homeHistory.streakCount >= 4 && data.homeHistory.streakType === 'L') {
+  // Cold streak signal (4+ game losing streak)
+  if (data.homeHistory?.streakCount >= 4 && data.homeHistory?.streakType === 'L') {
     signals.push({
       type: 'public_money',
-      team: data.awayHistory.teamAlias,
+      team: data.awayHistory?.teamAlias ?? 'Away',
       description: `${data.homeHistory.teamAlias} on ${data.homeHistory.streakCount}-game losing streak`,
       timestamp: now,
       confidence: 'medium',
     });
   }
-  if (data.awayHistory.streakCount >= 4 && data.awayHistory.streakType === 'L') {
+  if (data.awayHistory?.streakCount >= 4 && data.awayHistory?.streakType === 'L') {
     signals.push({
       type: 'public_money',
-      team: data.homeHistory.teamAlias,
+      team: data.homeHistory?.teamAlias ?? 'Home',
       description: `${data.awayHistory.teamAlias} on ${data.awayHistory.streakCount}-game losing streak`,
       timestamp: now,
       confidence: 'medium',
@@ -225,8 +225,8 @@ function generateBettingSignals(data: {
     });
   }
 
-  // Strong last 10 record
-  if (data.homeHistory.last10Record.wins >= 8) {
+  // Strong last 10 record (8+ wins)
+  if (data.homeHistory?.last10Record?.wins >= 8) {
     signals.push({
       type: 'sharp_action',
       team: data.homeHistory.teamAlias,
@@ -235,7 +235,7 @@ function generateBettingSignals(data: {
       confidence: 'high',
     });
   }
-  if (data.awayHistory.last10Record.wins >= 8) {
+  if (data.awayHistory?.last10Record?.wins >= 8) {
     signals.push({
       type: 'sharp_action',
       team: data.awayHistory.teamAlias,
@@ -245,8 +245,8 @@ function generateBettingSignals(data: {
     });
   }
 
-  // Weak last 10 record
-  if (data.homeHistory.last10Record.losses >= 8) {
+  // Weak last 10 record (8+ losses)
+  if (data.homeHistory?.last10Record?.losses >= 8) {
     signals.push({
       type: 'public_money',
       team: data.awayHistory?.teamAlias ?? 'Away',
@@ -255,7 +255,7 @@ function generateBettingSignals(data: {
       confidence: 'medium',
     });
   }
-  if (data.awayHistory.last10Record.losses >= 8) {
+  if (data.awayHistory?.last10Record?.losses >= 8) {
     signals.push({
       type: 'public_money',
       team: data.homeHistory?.teamAlias ?? 'Home',
@@ -265,8 +265,8 @@ function generateBettingSignals(data: {
     });
   }
 
-  // H2H dominance
-  if (data.homeHistory.headToHead.length >= 3) {
+  // H2H dominance (4+ wins in last 5+ meetings)
+  if (data.homeHistory?.headToHead && data.homeHistory.headToHead.length >= 3) {
     const homeH2HWins = data.homeHistory.headToHead.filter((g: any) => g.result === 'W').length;
     const h2hTotal = data.homeHistory.headToHead.length;
     
