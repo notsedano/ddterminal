@@ -11,8 +11,14 @@ import type {
   SportradarAPIError,
   NBAGame,
   MatchPanelGame,
+  NBAStandings,
+  NBASeasonSchedule,
+  NBATeamSeasonalStats,
+  NBATeamStanding,
+  TeamMatchHistory,
+  MatchResult,
 } from '@/types';
-import { transformToMatchPanelGame } from '@/types';
+import { transformToMatchPanelGame, isGameComplete } from '@/types';
 
 // Detect environment and use appropriate API base
 const IS_DEV = import.meta.env.DEV;
@@ -408,6 +414,198 @@ export function getNextUpcomingGame(games: MatchPanelGame[]): MatchPanelGame | n
     .sort((a, b) => a.scheduledTime.getTime() - b.scheduledTime.getTime());
   
   return upcoming[0] || null;
+}
+
+// =============================================================================
+// NEW ENDPOINTS: STANDINGS, SEASON SCHEDULE, TEAM STATS
+// =============================================================================
+
+/**
+ * Get the NBA season year based on current date
+ */
+function getCurrentSeasonYear(): number {
+  const now = new Date();
+  const month = now.getMonth();
+  const year = now.getFullYear();
+  return month >= 9 ? year : year - 1;
+}
+
+/**
+ * Fetch NBA standings
+ */
+export async function getNBAStandings(seasonYear?: number, seasonType?: string): Promise<NBAStandings> {
+  const year = seasonYear ?? getCurrentSeasonYear();
+  const type = seasonType ?? 'REG';
+
+  if (IS_DEV) {
+    const path = `/nba/${ACCESS_LEVEL}/${API_VERSION}/en/seasons/${year}/${type}/standings.json`;
+    return fetchFromApi<NBAStandings>(path);
+  } else {
+    return fetchFromApi<NBAStandings>('/standings', { year, seasonType: type });
+  }
+}
+
+/**
+ * Fetch NBA season schedule
+ */
+export async function getNBASeasonSchedule(
+  seasonYear?: number, 
+  seasonType?: string,
+  teamId?: string
+): Promise<NBASeasonSchedule> {
+  const year = seasonYear ?? getCurrentSeasonYear();
+  const type = seasonType ?? 'REG';
+
+  if (IS_DEV) {
+    const path = `/nba/${ACCESS_LEVEL}/${API_VERSION}/en/games/${year}/${type}/schedule.json`;
+    const data = await fetchFromApi<NBASeasonSchedule>(path);
+    
+    // Filter by team if requested
+    if (teamId && data.games) {
+      return {
+        ...data,
+        games: data.games.filter(
+          game => game.home.id === teamId || game.away.id === teamId
+        ),
+      };
+    }
+    return data;
+  } else {
+    const params: Record<string, string | number> = { year, seasonType: type };
+    if (teamId) params.teamId = teamId;
+    return fetchFromApi<NBASeasonSchedule>('/season-schedule', params);
+  }
+}
+
+/**
+ * Fetch team seasonal statistics
+ */
+export async function getNBATeamStats(
+  teamId: string,
+  seasonYear?: number,
+  seasonType?: string
+): Promise<NBATeamSeasonalStats> {
+  const year = seasonYear ?? getCurrentSeasonYear();
+  const type = seasonType ?? 'REG';
+
+  if (IS_DEV) {
+    const path = `/nba/${ACCESS_LEVEL}/${API_VERSION}/en/seasons/${year}/${type}/teams/${teamId}/statistics.json`;
+    return fetchFromApi<NBATeamSeasonalStats>(path);
+  } else {
+    return fetchFromApi<NBATeamSeasonalStats>('/team-stats', { teamId, year, seasonType: type });
+  }
+}
+
+/**
+ * Extract team standing from full standings response
+ */
+export function getTeamStanding(standings: NBAStandings, teamId: string): NBATeamStanding | null {
+  for (const conference of standings.conferences) {
+    for (const division of conference.divisions) {
+      const team = division.teams.find(t => t.id === teamId);
+      if (team) {
+        return {
+          ...team,
+          conference: conference.name,
+          division: division.name,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Calculate match history for a team from season schedule
+ */
+export function calculateTeamMatchHistory(
+  teamId: string,
+  teamAlias: string,
+  games: NBAGame[],
+  opponentId?: string,
+  limit: number = 10
+): TeamMatchHistory {
+  // Filter to completed games for this team
+  const teamGames = games
+    .filter(game => 
+      isGameComplete(game.status) && 
+      (game.home.id === teamId || game.away.id === teamId)
+    )
+    .sort((a, b) => new Date(b.scheduled).getTime() - new Date(a.scheduled).getTime());
+
+  // Convert to match results
+  const matchResults: MatchResult[] = teamGames.map(game => {
+    const isHome = game.home.id === teamId;
+    const teamScore = isHome ? (game.home.points ?? game.home_points ?? 0) : (game.away.points ?? game.away_points ?? 0);
+    const opponentScore = isHome ? (game.away.points ?? game.away_points ?? 0) : (game.home.points ?? game.home_points ?? 0);
+    const result: 'W' | 'L' = teamScore > opponentScore ? 'W' : 'L';
+    
+    return {
+      gameId: game.id,
+      date: game.scheduled,
+      opponent: isHome ? game.away : game.home,
+      isHome,
+      teamScore,
+      opponentScore,
+      result,
+      marginOfVictory: teamScore - opponentScore,
+    };
+  });
+
+  // Get last N games
+  const lastNGames = matchResults.slice(0, limit);
+
+  // Calculate head-to-head if opponent specified
+  const headToHead = opponentId 
+    ? matchResults.filter(r => r.opponent.id === opponentId).slice(0, 10)
+    : [];
+
+  // Calculate streak
+  let streakType: 'W' | 'L' = lastNGames[0]?.result ?? 'W';
+  let streakCount = 0;
+  for (const game of lastNGames) {
+    if (game.result === streakType) {
+      streakCount++;
+    } else {
+      break;
+    }
+  }
+
+  // Calculate last 10 record
+  const last10 = lastNGames.slice(0, 10);
+  const last10Wins = last10.filter(g => g.result === 'W').length;
+  const last10Record = { wins: last10Wins, losses: last10.length - last10Wins };
+
+  // Calculate home/away records
+  const homeGames = matchResults.filter(g => g.isHome);
+  const awayGames = matchResults.filter(g => !g.isHome);
+  const homeRecord = { 
+    wins: homeGames.filter(g => g.result === 'W').length, 
+    losses: homeGames.filter(g => g.result === 'L').length 
+  };
+  const awayRecord = { 
+    wins: awayGames.filter(g => g.result === 'W').length, 
+    losses: awayGames.filter(g => g.result === 'L').length 
+  };
+
+  // ATS and OU records need market data - initialize empty for now
+  // These will be populated by betting indicators hook
+  const atsRecord = { covers: 0, pushes: 0, total: 0 };
+  const ouRecord = { overs: 0, pushes: 0, total: 0 };
+
+  return {
+    teamId,
+    teamAlias,
+    lastNGames,
+    headToHead,
+    streakType,
+    streakCount,
+    last10Record,
+    homeRecord,
+    awayRecord,
+    atsRecord,
+    ouRecord,
+  };
 }
 
 /**

@@ -333,6 +333,191 @@ export interface NBAPushGamePayload {
   };
 }
 
+// =============================================================================
+// MATCH HISTORY TYPES
+// =============================================================================
+
+/**
+ * Result of a single match for history tracking
+ */
+export interface MatchResult {
+  gameId: string;
+  date: string;
+  opponent: NBATeam;
+  isHome: boolean;
+  teamScore: number;
+  opponentScore: number;
+  result: 'W' | 'L';
+  spreadResult?: 'COVER' | 'PUSH' | 'MISS';
+  totalResult?: 'OVER' | 'PUSH' | 'UNDER';
+  marginOfVictory: number;
+}
+
+/**
+ * Team match history with streaks and patterns
+ */
+export interface TeamMatchHistory {
+  teamId: string;
+  teamAlias: string;
+  lastNGames: MatchResult[];
+  headToHead: MatchResult[];
+  streakType: 'W' | 'L';
+  streakCount: number;
+  last10Record: { wins: number; losses: number };
+  homeRecord: { wins: number; losses: number };
+  awayRecord: { wins: number; losses: number };
+  atsRecord: { covers: number; pushes: number; total: number };
+  ouRecord: { overs: number; pushes: number; total: number };
+}
+
+/**
+ * Team standing information from standings API
+ */
+export interface NBATeamStanding {
+  id: string;
+  name: string;
+  market: string;
+  alias: string;
+  wins: number;
+  losses: number;
+  winPct: number;
+  pointsFor: number;
+  pointsAgainst: number;
+  pointDiff: number;
+  streak: {
+    kind: 'win' | 'loss';
+    length: number;
+  };
+  homeRecord: { wins: number; losses: number };
+  awayRecord: { wins: number; losses: number };
+  last10: { wins: number; losses: number };
+  conferenceRank: number;
+  divisionRank: number;
+  gamesBack: number;
+  conference: string;
+  division: string;
+}
+
+/**
+ * Full standings response
+ */
+export interface NBAStandings {
+  season: {
+    id: string;
+    year: number;
+    type: string;
+  };
+  conferences: Array<{
+    id: string;
+    name: string;
+    alias: string;
+    divisions: Array<{
+      id: string;
+      name: string;
+      alias: string;
+      teams: NBATeamStanding[];
+    }>;
+  }>;
+}
+
+/**
+ * Season schedule response
+ */
+export interface NBASeasonSchedule {
+  season: {
+    id: string;
+    year: number;
+    type: string;
+  };
+  games: NBAGame[];
+}
+
+/**
+ * Team seasonal statistics
+ */
+export interface NBATeamSeasonalStats {
+  id: string;
+  name: string;
+  market: string;
+  alias: string;
+  own_record: { wins: number; losses: number };
+  opponents?: NBATeamStatistics;
+  players?: NBAPlayerStats[];
+  statistics: {
+    totals: NBATeamStatistics;
+    average: NBATeamStatistics;
+  };
+}
+
+// =============================================================================
+// BETTING INDICATORS TYPES
+// =============================================================================
+
+/**
+ * Line movement tracking
+ */
+export interface LineMovement {
+  timestamp: Date;
+  oldLine: number;
+  newLine: number;
+  direction: 'up' | 'down' | 'neutral';
+  magnitude: number;
+}
+
+/**
+ * Betting signal indicators
+ */
+export interface BettingSignal {
+  type: 'steam_move' | 'reverse_line' | 'sharp_action' | 'public_money';
+  team: string;
+  description: string;
+  timestamp: Date;
+  confidence: 'low' | 'medium' | 'high';
+}
+
+/**
+ * Comprehensive betting indicators for a game
+ */
+export interface GameBettingIndicators {
+  gameId: string;
+  homeTeamId: string;
+  awayTeamId: string;
+  
+  // Rest and schedule
+  homeRestDays: number;
+  awayRestDays: number;
+  homeIsBackToBack: boolean;
+  awayIsBackToBack: boolean;
+  
+  // Streaks (from match history)
+  homeStreak: { type: 'W' | 'L'; count: number };
+  awayStreak: { type: 'W' | 'L'; count: number };
+  
+  // Records
+  homeLast10: { wins: number; losses: number };
+  awayLast10: { wins: number; losses: number };
+  homeATS: { covers: number; pushes: number; total: number };
+  awayATS: { covers: number; pushes: number; total: number };
+  homeOU: { overs: number; pushes: number; total: number };
+  awayOU: { overs: number; pushes: number; total: number };
+  
+  // Line movement
+  lineMovements: LineMovement[];
+  currentSpread?: number;
+  openingSpread?: number;
+  
+  // Market efficiency
+  overround: number;
+  marketEfficiency: 'low' | 'medium' | 'high';
+  
+  // Signals
+  signals: BettingSignal[];
+  
+  // Head to head
+  h2hRecord: { homeWins: number; awayWins: number; total: number };
+  h2hAverageTotal: number;
+}
+
 // Frontend-specific types for display
 export interface MatchPanelGame {
   id: string;

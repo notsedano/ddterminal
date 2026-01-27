@@ -3,20 +3,26 @@
  * Displays a single match with teams, score, and comprehensive market data from Polymarket
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, memo } from 'react';
 import { cn } from '@/utils/cn';
 import type { MatchPanelGame, PolymarketSportsMarket, SportsMarketType } from '@/types';
 import { isGameScheduled, formatPriceAsPercentage, formatPriceAsAmericanOdds, formatVolume } from '@/types';
 import { formatTimeUntilGame } from '@/services/api/sportradar';
 import { useGameMarketData, usePolymarketForGame } from '@/hooks/usePolymarketNBA';
+import { useNBAInjuries } from '@/hooks/useNBAInjuries';
+import { useMatchHistory } from '@/hooks/useMatchHistory';
+import { useBettingIndicators } from '@/hooks/useBettingIndicators';
 import type { ParsedGameMarket } from '@/services/api/polymarket';
 import { MatchStatusBadge } from './MatchStatusBadge';
 import { MarketDetails } from './MarketDetails';
 import { MarketButton } from './MarketButton';
 import { ShinyButton } from './ShinyButton';
+import { InjuryReport } from './InjuryReport';
+import { StreakPanel } from './StreakIndicator';
+import { BettingSignalsPanel } from './BettingSignals';
 import { TeamLogo } from '@/components/TeamLogo';
-import { Clock, Calendar, ExternalLink, TrendingUp, Wifi, Activity, ArrowUpDown, Target, DollarSign, ChevronDown, ChevronUp, BarChart3, LineChart as LineChartIcon } from 'lucide-react';
-import { PriceLineChart } from '@/components/charts';
+import { Clock, Calendar, ExternalLink, TrendingUp, Wifi, Activity, ArrowUpDown, Target, DollarSign, ChevronDown, ChevronUp, BarChart3, LineChart as LineChartIcon, Flame, Zap } from 'lucide-react';
+import { PriceLineChart, OutcomeComparisonChart } from '@/components/charts';
 import { HudChartWrapper } from '@/components/ui/HudChartWrapper';
 import { format } from 'date-fns';
 
@@ -26,7 +32,11 @@ interface MatchCardProps {
   className?: string;
 }
 
-export function MatchCard({ game, market: marketProp, className }: MatchCardProps) {
+/**
+ * Main MatchCard component - memoized to prevent unnecessary re-renders
+ * during live updates when props haven't changed
+ */
+export const MatchCard = memo(function MatchCard({ game, market: marketProp, className }: MatchCardProps) {
   const isScheduled = isGameScheduled(game.status);
   const now = new Date();
   const isUpcoming = isScheduled && game.scheduledTime > now;
@@ -39,6 +49,23 @@ export function MatchCard({ game, market: marketProp, className }: MatchCardProp
   
   // Use prop market or fetched market
   const market = marketProp ?? fetchedMarket ?? null;
+
+  // Fetch injury data for this game
+  const { getInjuriesForGame } = useNBAInjuries();
+  const { home: homeInjuries, away: awayInjuries } = getInjuriesForGame(game);
+  
+  // Fetch match history for streak indicators
+  const { homeHistory, awayHistory } = useMatchHistory(game, { 
+    limit: 10, 
+    includeH2H: true 
+  });
+  
+  // Fetch betting indicators
+  const { indicators } = useBettingIndicators(game);
+  
+  // Track expanded sections
+  const [showMatchHistory, setShowMatchHistory] = useState(false);
+  const [showBettingSignals, setShowBettingSignals] = useState(false);
   
   // Track selected market type
   const [selectedMarketType, setSelectedMarketType] = useState<SportsMarketType>('MONEYLINE');
@@ -194,6 +221,93 @@ export function MatchCard({ game, market: marketProp, className }: MatchCardProp
         )}
       </div>
 
+      {/* Injury Report */}
+      <InjuryReport 
+        homeInjuries={homeInjuries}
+        awayInjuries={awayInjuries}
+      />
+
+      {/* Match History Section */}
+      {(homeHistory && awayHistory) && (
+        <div className="border-t border-border pt-3 mt-1">
+          <button
+            onClick={() => setShowMatchHistory(!showMatchHistory)}
+            className="flex items-center justify-between w-full px-2 py-1.5 rounded-lg hover:bg-muted/50 transition-colors"
+          >
+            <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <Flame className="h-3.5 w-3.5" />
+              <span>Match History</span>
+              {/* Quick streak preview */}
+              <div className="flex items-center gap-1.5 ml-2">
+                <span className={cn(
+                  'text-[10px] font-bold px-1 rounded',
+                  homeHistory.streakType === 'W' ? 'text-green-400 bg-green-500/20' : 'text-red-400 bg-red-500/20'
+                )}>
+                  {game.home.team.alias} {homeHistory.streakType}{homeHistory.streakCount}
+                </span>
+                <span className={cn(
+                  'text-[10px] font-bold px-1 rounded',
+                  awayHistory.streakType === 'W' ? 'text-green-400 bg-green-500/20' : 'text-red-400 bg-red-500/20'
+                )}>
+                  {game.away.team.alias} {awayHistory.streakType}{awayHistory.streakCount}
+                </span>
+              </div>
+            </div>
+            {showMatchHistory ? (
+              <ChevronUp className="h-4 w-4 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            )}
+          </button>
+
+          {showMatchHistory && (
+            <div className="mt-3">
+              <StreakPanel
+                homeHistory={homeHistory}
+                awayHistory={awayHistory}
+                homeAlias={game.home.team.alias}
+                awayAlias={game.away.team.alias}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Betting Signals Section */}
+      {indicators && (
+        <div className="border-t border-border pt-3 mt-1">
+          <button
+            onClick={() => setShowBettingSignals(!showBettingSignals)}
+            className="flex items-center justify-between w-full px-2 py-1.5 rounded-lg hover:bg-muted/50 transition-colors"
+          >
+            <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <Zap className="h-3.5 w-3.5" />
+              <span>Betting Signals</span>
+              {indicators.signals.length > 0 && (
+                <span className="text-[10px] text-yellow-400 bg-yellow-500/20 px-1.5 py-0.5 rounded">
+                  {indicators.signals.length} signal{indicators.signals.length !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+            {showBettingSignals ? (
+              <ChevronUp className="h-4 w-4 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            )}
+          </button>
+
+          {showBettingSignals && (
+            <div className="mt-3">
+              <BettingSignalsPanel
+                indicators={indicators}
+                homeAlias={game.home.team.alias}
+                awayAlias={game.away.team.alias}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Live indicator */}
       {(hasMarketData || isLoadingMarkets) && (
         <div className="flex items-center justify-center gap-1 text-[10px] text-muted-foreground/50">
@@ -203,7 +317,7 @@ export function MatchCard({ game, market: marketProp, className }: MatchCardProp
       )}
     </div>
   );
-}
+});
 
 /**
  * Team Row Component
@@ -224,7 +338,10 @@ interface TeamRowProps {
   isFirst: boolean;
 }
 
-function TeamRow({ team, score, record, odds, marketType, line, isAway, isFirst }: TeamRowProps) {
+/**
+ * TeamRow - memoized to prevent re-renders when team data hasn't changed
+ */
+const TeamRow = memo(function TeamRow({ team, score, record, odds, marketType, line, isAway, isFirst }: TeamRowProps) {
   const hasScore = score > 0;
 
   // Format odds display based on market type
@@ -300,7 +417,7 @@ function TeamRow({ team, score, record, odds, marketType, line, isAway, isFirst 
       </div>
     </div>
   );
-}
+});
 
 /**
  * Game Market Display Component
@@ -312,7 +429,10 @@ interface GameMarketDisplayProps {
   eventSlug: string;
 }
 
-function GameMarketDisplay({ market, totalVolume, eventSlug }: GameMarketDisplayProps) {
+/**
+ * GameMarketDisplay - memoized for stable market data
+ */
+const GameMarketDisplay = memo(function GameMarketDisplay({ market, totalVolume, eventSlug }: GameMarketDisplayProps) {
   const [showCharts, setShowCharts] = useState(false);
   const [activeChartTab, setActiveChartTab] = useState<'price' | 'compare'>('price');
   const [selectedOutcomeIndex, setSelectedOutcomeIndex] = useState(0);
@@ -494,30 +614,17 @@ function GameMarketDisplay({ market, totalVolume, eventSlug }: GameMarketDisplay
 
               {/* Compare Chart - Both outcomes overlaid */}
               {activeChartTab === 'compare' && market.outcomes.length >= 2 && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-center gap-4 text-xs">
-                    {market.outcomes.slice(0, 2).map((outcome, index) => (
-                      <div key={outcome.tokenId || index} className="flex items-center gap-1.5">
-                        <div 
-                          className={cn(
-                            'w-2.5 h-2.5 rounded-sm',
-                            index === 0 ? 'bg-green-500' : 'bg-red-500'
-                          )} 
-                        />
-                        <span className="text-muted-foreground">{outcome.name}</span>
-                      </div>
-                    ))}
-                  </div>
-                  {/* Show first outcome chart as representative */}
-                  <HudChartWrapper showScanlines={true} variant="default">
-                    <PriceLineChart
-                      tokenId={market.outcomes[0].tokenId}
-                      outcomeName={market.outcomes[0].name}
-                      height={180}
-                      showTimeSelector={true}
-                    />
-                  </HudChartWrapper>
-                </div>
+                <HudChartWrapper showScanlines={true} variant="default">
+                  <OutcomeComparisonChart
+                    outcomes={market.outcomes.slice(0, 2).map(o => ({
+                      tokenId: o.tokenId,
+                      name: o.name,
+                      price: o.price,
+                    }))}
+                    height={180}
+                    showTimeSelector={true}
+                  />
+                </HudChartWrapper>
               )}
             </div>
           )}
@@ -539,12 +646,12 @@ function GameMarketDisplay({ market, totalVolume, eventSlug }: GameMarketDisplay
       )}
     </div>
   );
-}
+});
 
 /**
  * Parsed Market Odds Bar - Visual representation of odds
  */
-function ParsedMarketOddsBar({ outcomes }: { outcomes: Array<{ name: string; price: number }> }) {
+const ParsedMarketOddsBar = memo(function ParsedMarketOddsBar({ outcomes }: { outcomes: Array<{ name: string; price: number }> }) {
   if (outcomes.length < 2) return null;
 
   const leftPct = Math.round(outcomes[0].price * 100);
@@ -568,7 +675,7 @@ function ParsedMarketOddsBar({ outcomes }: { outcomes: Array<{ name: string; pri
       <span className="text-[10px] text-red-400 font-medium">{rightPct}%</span>
     </div>
   );
-}
+});
 
 /**
  * Game Market Type Tabs - Compact tabs for switching between market types
@@ -644,12 +751,13 @@ function getTeamOddsFromParsedMarket(
   teamName: string, 
   isFirst: boolean
 ): number | null {
-  if (!market || market.outcomes.length === 0) return null;
+  if (!market || market.outcomes.length === 0 || !teamName) return null;
   
   const teamLower = teamName.toLowerCase();
   
   // For moneyline/spread, find the team in outcomes
   for (const outcome of market.outcomes) {
+    if (!outcome?.name) continue;
     const outcomeLower = outcome.name.toLowerCase();
     if (outcomeLower.includes(teamLower)) {
       return outcome.price;
@@ -684,7 +792,10 @@ interface MinimalMatchCardProps {
   className?: string;
 }
 
-export function MinimalMatchCard({ game, market, isActive, onClick, className }: MinimalMatchCardProps) {
+/**
+ * MinimalMatchCard - memoized for list views
+ */
+export const MinimalMatchCard = memo(function MinimalMatchCard({ game, market, isActive, onClick, className }: MinimalMatchCardProps) {
   return (
     <button
       onClick={onClick}
@@ -738,7 +849,7 @@ export function MinimalMatchCard({ game, market, isActive, onClick, className }:
       </div>
     </button>
   );
-}
+});
 
 /**
  * Expanded Match Card with full market details
@@ -750,7 +861,10 @@ interface ExpandedMatchCardProps {
   className?: string;
 }
 
-export function ExpandedMatchCard({ game, market, className }: ExpandedMatchCardProps) {
+/**
+ * ExpandedMatchCard - memoized for detail views
+ */
+export const ExpandedMatchCard = memo(function ExpandedMatchCard({ game, market, className }: ExpandedMatchCardProps) {
   return (
     <div className={cn('flex flex-col gap-4 p-4 bg-background rounded-xl border border-border', className)}>
       <MatchCard 
@@ -773,4 +887,4 @@ export function ExpandedMatchCard({ game, market, className }: ExpandedMatchCard
       )}
     </div>
   );
-}
+});

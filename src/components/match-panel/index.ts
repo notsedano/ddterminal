@@ -8,6 +8,7 @@ export { MatchCard, MinimalMatchCard } from './MatchCard';
 export { MatchNavigation } from './MatchNavigation';
 export { MatchStatusBadge } from './MatchStatusBadge';
 export { LiveStats, CompactLiveStats } from './LiveStats';
+export { InjuryReport } from './InjuryReport';
 export { MarketData, CompactMarketData, OddsBar } from './MarketData';
 
 // Enhanced Polymarket components
@@ -28,3 +29,17 @@ export {
   Sparkline, 
   MarketPriceCharts 
 } from './PriceChart';
+
+// Match History and Betting Signals
+export {
+  StreakRoad,
+  CompactStreak,
+  DualStreakIndicator,
+  BaccaratRoad,
+  HeadToHeadStreak,
+  StreakPanel,
+} from './StreakIndicator';
+export {
+  BettingSignalsPanel,
+  CompactBettingSignals,
+} from './BettingSignals';
