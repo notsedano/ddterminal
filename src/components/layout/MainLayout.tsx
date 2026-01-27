@@ -18,7 +18,7 @@ export interface MainLayoutProps {
 
 export function MainLayout({ agentId }: MainLayoutProps) {
   // Handle when a matchup session is started from MatchPanel
-  const handleMatchupSessionStarted = useCallback((session: Session) => {
+  const handleMatchupSessionStarted = useCallback((_session: Session) => {
     // This will be handled by MainLayoutContent via the context
   }, []);
 
