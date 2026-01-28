@@ -7,3 +7,4 @@ export { default as apiClient } from './client';
 export * from './sessions';
 export * from './messages';
 export * from './healthCheck';
+export * from './prediction';

@@ -8,6 +8,10 @@ interface MarketButtonProps {
   isHigher: boolean;
   href?: string;
   className?: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  variant?: 'rainbow' | 'gold';
+  size?: 'default' | 'small';
 }
 
 export const MarketButton: React.FC<MarketButtonProps> = ({ 
@@ -16,27 +20,51 @@ export const MarketButton: React.FC<MarketButtonProps> = ({
   odds, 
   isHigher,
   href,
-  className 
+  className,
+  onClick,
+  disabled = false,
+  variant = 'rainbow',
+  size = 'default'
 }) => {
+  const textSizeClass = size === 'small' ? 'text-[8px]' : 'text-[10px]';
+  const percentageSizeClass = size === 'small' ? 'text-sm' : 'text-lg';
+  
   const content = (
     <>
-      <span className="text-[10px] text-muted-foreground truncate max-w-full leading-tight">
+      <span className={cn(textSizeClass, 'text-muted-foreground truncate max-w-full leading-tight')}>
         {name}
       </span>
-      <span className={cn(
-        'text-lg font-bold hud-data leading-tight',
-        isHigher ? 'text-green-400' : 'text-red-400'
-      )}>
-        {percentage}
-      </span>
-      <span className="text-[10px] text-muted-foreground hud-data leading-tight">
-        {odds}
-      </span>
+      {percentage && (
+        <span className={cn(
+          percentageSizeClass,
+          'font-bold hud-data leading-tight',
+          isHigher ? 'text-green-400' : 'text-red-400'
+        )}>
+          {percentage}
+        </span>
+      )}
+      {odds && (
+        <span className={cn(textSizeClass, 'text-muted-foreground hud-data leading-tight')}>
+          {odds}
+        </span>
+      )}
     </>
   );
 
+  const borderClass = variant === 'gold' 
+    ? 'gold-border gold-border-no-glow' 
+    : 'rainbow-border rainbow-border-no-glow';
+  
+  const sizeClasses = size === 'small' 
+    ? 'w-[98px] h-[48px] text-[8px] px-2' 
+    : 'w-[140px] h-[68px] px-3';
+  
   const buttonStyles = cn(
-    'rainbow-border rainbow-border-no-glow relative w-[140px] h-[68px] flex flex-col items-center justify-center gap-0.5 px-3 rounded-xl border-none text-white cursor-pointer font-black transition-all duration-200 bg-black/80'
+    borderClass,
+    sizeClasses,
+    'relative flex flex-col items-center justify-center gap-0.5 rounded-xl border-none text-white font-black transition-all duration-200 bg-black/80',
+    disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:opacity-90',
+    onClick && !disabled && 'hover:scale-105 active:scale-95'
   );
 
   return (
@@ -53,6 +81,8 @@ export const MarketButton: React.FC<MarketButtonProps> = ({
       ) : (
         <button 
           className={buttonStyles}
+          onClick={onClick}
+          disabled={disabled}
         >
           {content}
         </button>

@@ -5,7 +5,7 @@
  * - Live/Completed: Shows current game stats
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { cn } from '@/utils/cn';
 import { useMatchPanel } from '@/hooks/useMatchPanel';
 import { useGameStats, type SortField, type SortDirection } from '@/hooks/useGameStats';
@@ -13,11 +13,14 @@ import { useNBAInjuries } from '@/hooks/useNBAInjuries';
 import { PlayerStatsRow } from './PlayerStatsRow';
 import { ChevronDown, ChevronUp, TrendingUp, Activity, BarChart3 } from 'lucide-react';
 
+const STORAGE_KEY = 'live-team-stats-prefer-season';
+
 export function LiveTeamStats() {
   const { currentMatch } = useMatchPanel();
   const game = currentMatch?.game ?? null;
   const gameId = game?.id ?? null;
   const isLive = game?.isLive ?? false;
+  const isScheduled = game?.status === 'scheduled' || game?.status === 'created' || game?.status === 'time-tbd';
 
   // Fetch injury data for this game (shared with injury report)
   const { getInjuriesForGame } = useNBAInjuries();
@@ -25,11 +28,56 @@ export function LiveTeamStats() {
     ? getInjuriesForGame(game)
     : { home: null, away: null };
 
+  // Toggle state - persist in localStorage
+  const [preferSeasonStats, setPreferSeasonStats] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      return stored === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  // Track previous game state to detect when game goes live or when switching games
+  const [prevGameId, setPrevGameId] = useState<string | null>(gameId);
+  const [prevIsLive, setPrevIsLive] = useState(isLive);
+  
+  // Auto-switch to live stats when:
+  // 1. Game goes live (was scheduled, now live)
+  // 2. Switching to a new game that's already live
+  useEffect(() => {
+    // Game changed - reset to live stats if new game is live
+    if (gameId !== prevGameId && isLive) {
+      setPreferSeasonStats(false);
+      try {
+        localStorage.setItem(STORAGE_KEY, 'false');
+      } catch {
+        // Ignore storage errors
+      }
+      setPrevGameId(gameId);
+      setPrevIsLive(isLive);
+      return;
+    }
+    
+    // Game just went live (status changed from scheduled to live)
+    if (isLive && !prevIsLive) {
+      setPreferSeasonStats(false);
+      try {
+        localStorage.setItem(STORAGE_KEY, 'false');
+      } catch {
+        // Ignore storage errors
+      }
+    }
+    
+    setPrevGameId(gameId);
+    setPrevIsLive(isLive);
+  }, [gameId, isLive, prevGameId, prevIsLive]);
+
   const {
     homePlayers,
     awayPlayers,
     isLoading,
-    error,
+    error: gameStatsError,
     isSeasonStats,
     sortPlayers,
     getTopScorer,
@@ -40,7 +88,25 @@ export function LiveTeamStats() {
     autoRefresh: isLive,
     homeInjuries,
     awayInjuries,
+    preferSeasonStats, // Respect user toggle preference
   });
+
+  // Debug logging
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[LiveTeamStats] Component state', {
+        gameId,
+        isLive,
+        isScheduled,
+        preferSeasonStats,
+        isSeasonStats,
+        homePlayersCount: homePlayers.length,
+        awayPlayersCount: awayPlayers.length,
+        isLoading,
+        error: gameStatsError?.message,
+      });
+    }
+  }, [gameId, isLive, isScheduled, preferSeasonStats, isSeasonStats, homePlayers.length, awayPlayers.length, isLoading, gameStatsError]);
 
   // Team selection
   const [selectedTeam, setSelectedTeam] = useState<'home' | 'away'>('home');
@@ -95,7 +161,7 @@ export function LiveTeamStats() {
   }
 
   // Error state
-  if (error) {
+  if (gameStatsError) {
     return (
       <div className="p-4 border-t border-border flex flex-col items-center justify-center gap-2 min-h-[120px]">
         <span className="text-xs text-destructive text-center">
@@ -105,13 +171,15 @@ export function LiveTeamStats() {
     );
   }
 
-  // No stats available
-  if (homePlayers.length === 0 && awayPlayers.length === 0) {
+  // No stats available (only show if not loading and not in error state)
+  if (!isLoading && !gameStatsError && homePlayers.length === 0 && awayPlayers.length === 0) {
     return (
       <div className="p-4 border-t border-border flex flex-col items-center justify-center gap-2 min-h-[120px]">
         <BarChart3 className="h-6 w-6 text-muted-foreground/50" />
         <span className="text-xs text-muted-foreground text-center">
-          No stats available
+          {isLive && !isSeasonStats 
+            ? 'Game stats will appear when players start playing'
+            : 'No stats available'}
         </span>
       </div>
     );
@@ -131,22 +199,60 @@ export function LiveTeamStats() {
 
     return (
       <div className="p-3 border-t border-border">
-        <button
-          onClick={() => setIsCollapsed(false)}
-          className="w-full flex items-center justify-between text-xs text-muted-foreground hover:text-foreground transition-colors mb-2"
-        >
-          <div className="flex items-center gap-2">
-            <span className="font-medium">
-              {isSeasonStats ? 'Season Stats' : 'Live Stats'}
-            </span>
-            {isSeasonStats && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400">
-                AVG
+        <div className="flex items-center justify-between mb-2">
+          <button
+            onClick={() => setIsCollapsed(false)}
+            className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <span className="font-medium">
+                {isSeasonStats ? 'Season Stats' : 'Live Stats'}
               </span>
+              {isSeasonStats && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400">
+                  AVG
+                </span>
+              )}
+            </div>
+          </button>
+          <div className="flex items-center gap-2">
+            {/* Toggle Switch in collapsed view */}
+            {(isLive || (!isScheduled && homePlayers.length > 0)) && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const newValue = !preferSeasonStats;
+                  setPreferSeasonStats(newValue);
+                  try {
+                    localStorage.setItem(STORAGE_KEY, String(newValue));
+                  } catch {
+                    // Ignore storage errors
+                  }
+                }}
+                className={cn(
+                  'relative inline-flex h-4 w-7 items-center rounded-full transition-colors',
+                  preferSeasonStats ? 'bg-blue-500' : 'bg-primary'
+                )}
+                aria-label={preferSeasonStats ? 'Switch to Live Stats' : 'Switch to Season Stats'}
+                title={preferSeasonStats ? 'Switch to Live Stats' : 'Switch to Season Stats'}
+              >
+                <span
+                  className={cn(
+                    'inline-block h-2.5 w-2.5 transform rounded-full bg-white transition-transform',
+                    preferSeasonStats ? 'translate-x-4' : 'translate-x-0.5'
+                  )}
+                />
+              </button>
             )}
+            <button
+              onClick={() => setIsCollapsed(false)}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Expand stats"
+            >
+              <ChevronUp className="h-4 w-4" />
+            </button>
           </div>
-          <ChevronUp className="h-4 w-4" />
-        </button>
+        </div>
         
         {/* Top Scorer Matchup */}
         {topScorerHome && topScorerAway && (
@@ -208,13 +314,42 @@ export function LiveTeamStats() {
               </span>
             )}
           </div>
-          <button
-            onClick={() => setIsCollapsed(true)}
-            className="text-muted-foreground hover:text-foreground transition-colors"
-            aria-label="Collapse stats"
-          >
-            <ChevronDown className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Toggle Switch - show for live/completed games or when season stats are available */}
+            {(isLive || (!isScheduled && homePlayers.length > 0)) && (
+              <button
+                onClick={() => {
+                  const newValue = !preferSeasonStats;
+                  setPreferSeasonStats(newValue);
+                  try {
+                    localStorage.setItem(STORAGE_KEY, String(newValue));
+                  } catch {
+                    // Ignore storage errors
+                  }
+                }}
+                className={cn(
+                  'relative inline-flex h-5 w-9 items-center rounded-full transition-colors',
+                  preferSeasonStats ? 'bg-blue-500' : 'bg-primary'
+                )}
+                aria-label={preferSeasonStats ? 'Switch to Live Stats' : 'Switch to Season Stats'}
+                title={preferSeasonStats ? 'Switch to Live Stats' : 'Switch to Season Stats'}
+              >
+                <span
+                  className={cn(
+                    'inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform',
+                    preferSeasonStats ? 'translate-x-5' : 'translate-x-1'
+                  )}
+                />
+              </button>
+            )}
+            <button
+              onClick={() => setIsCollapsed(true)}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Collapse stats"
+            >
+              <ChevronDown className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {/* Team Tabs */}
@@ -347,7 +482,11 @@ export function LiveTeamStats() {
           {isLive ? (
             <>
               <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-              <span>Live updates</span>
+              <span>
+                {isSeasonStats 
+                  ? 'Season averages (toggle for live)' 
+                  : 'Live updates'}
+              </span>
             </>
           ) : isSeasonStats ? (
             <>
@@ -361,6 +500,19 @@ export function LiveTeamStats() {
             </>
           )}
         </div>
+        
+        {/* Debug info in development */}
+        {process.env.NODE_ENV === 'development' && (
+          <div className="text-[9px] text-muted-foreground/50 border-t border-border/30 pt-2 mt-2">
+            <div>Debug: preferSeason={String(preferSeasonStats)}, isSeason={String(isSeasonStats)}</div>
+            <div>Players: H={homePlayers.length} A={awayPlayers.length}, Loading={String(isLoading)}</div>
+            {gameStatsError && (
+              <div className="text-red-400">
+                Error: {(gameStatsError as Error | null)?.message || String(gameStatsError)}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

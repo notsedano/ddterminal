@@ -7,3 +7,4 @@ export * from './polymarket';
 export * from './auth';
 export * from './database';
 export * from './memory';
+export * from './prediction';

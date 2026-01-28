@@ -2,7 +2,18 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { PrivyAuthProvider } from './components/auth';
+import { initErrorTracking } from './utils/errorTracking';
 import './index.css';
+
+// Initialize error tracking in production
+if (import.meta.env.PROD) {
+  const sentryDsn = import.meta.env.VITE_SENTRY_DSN;
+  if (sentryDsn) {
+    initErrorTracking(sentryDsn);
+  } else {
+    initErrorTracking(); // Initialize without Sentry (console fallback)
+  }
+}
 
 // Suppress defaultProps warnings from third-party libraries (e.g., react-nba-logos)
 // These libraries use deprecated defaultProps pattern but still work fine

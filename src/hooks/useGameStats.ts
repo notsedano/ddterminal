@@ -1,11 +1,5 @@
-/**
- * Hook for fetching and processing game player statistics
- * - Pre-game: Uses team seasonal stats (cached for 10 minutes)
- * - Live/Completed: Uses boxscore data (refreshes every 15 seconds)
- */
-
-import { useQuery, useQueries } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useEffect, useState } from 'react';
 import { getNBAGameBoxscore, getNBATeamStats } from '@/services/api/sportradar';
 import type { 
   NBAGameSummary, 
@@ -56,6 +50,7 @@ interface UseGameStatsOptions {
   autoRefresh?: boolean;
   homeInjuries?: NBATeamInjuries | null;
   awayInjuries?: NBATeamInjuries | null;
+  preferSeasonStats?: boolean; // User preference to show season stats even for live games
 }
 
 interface UseGameStatsResult {
@@ -69,32 +64,23 @@ interface UseGameStatsResult {
   getHotHandPlayers: (team: 'home' | 'away') => PlayerGameStats[];
 }
 
-/**
- * Calculate betting impact based on player contribution
- */
 function calculateBettingImpact(
   player: PlayerGameStats,
   teamTotalPoints: number
 ): 'high' | 'medium' | 'low' {
   if (teamTotalPoints === 0) return 'low';
   
-  // High impact: >25% of team points OR +/- > +10
   if (player.points / teamTotalPoints > 0.25 || player.plusMinus > 10) {
     return 'high';
   }
   
-  // Medium impact: 15-25% of team points OR +/- between +3 and +10
   if (player.points / teamTotalPoints > 0.15 || (player.plusMinus > 3 && player.plusMinus <= 10)) {
     return 'medium';
   }
   
-  // Low impact: <15% of team points
   return 'low';
 }
 
-/**
- * Match a player to injury data by ID, name, or reference
- */
 function findPlayerInjury(
   playerId: string,
   playerName: string,
@@ -105,12 +91,10 @@ function findPlayerInjury(
   const normalizedName = playerName.toLowerCase().trim();
   
   return injuries.players.find(injuredPlayer => {
-    // Match by ID
     if (injuredPlayer.id === playerId || injuredPlayer.sr_id === playerId || injuredPlayer.reference === playerId) {
       return true;
     }
     
-    // Match by name (fuzzy)
     const injuredName = injuredPlayer.full_name.toLowerCase().trim();
     if (injuredName === normalizedName || 
         injuredName.includes(normalizedName) || 
@@ -118,7 +102,6 @@ function findPlayerInjury(
       return true;
     }
     
-    // Match by first + last name
     const injuredParts = injuredName.split(' ');
     const playerParts = normalizedName.split(' ');
     if (injuredParts.length >= 2 && playerParts.length >= 2) {
@@ -132,24 +115,18 @@ function findPlayerInjury(
   }) || null;
 }
 
-/**
- * Extract and normalize player stats from boxscore (live/completed games)
- */
 function extractPlayerStatsFromBoxscore(
   boxscore: NBAGameSummary,
   team: 'home' | 'away',
   injuries?: NBATeamInjuries | null
 ): PlayerGameStats[] {
   const teamData = boxscore[team];
-  if (!teamData?.players) {
-    return [];
-  }
+  if (!teamData?.players) return [];
 
   const teamTotalPoints = teamData.points || 0;
   const players: PlayerGameStats[] = [];
 
   for (const player of teamData.players) {
-    // Accept players that have played OR have statistics (handle edge cases)
     if (!player.statistics && !player.played) continue;
     
     const stats = player.statistics;
@@ -186,7 +163,6 @@ function extractPlayerStatsFromBoxscore(
       isInjured: !!injuredPlayer,
     };
 
-    // Calculate betting impact
     playerStats.bettingImpact = calculateBettingImpact(playerStats, teamTotalPoints);
     players.push(playerStats);
   }
@@ -194,32 +170,21 @@ function extractPlayerStatsFromBoxscore(
   return players;
 }
 
-/**
- * Normalize percentage values - API might return as decimal (0.52) or percentage (52)
- */
 function normalizePercentage(value: number | undefined): number {
   if (value === undefined || value === null) return 0;
-  // If value is less than 1, it's likely a decimal (0.52 = 52%)
   if (value > 0 && value < 1) {
     return value * 100;
   }
   return value;
 }
 
-/**
- * Extract player statistics from various possible structures
- * Sportradar API can return stats in different fields depending on the endpoint
- */
 function getPlayerStats(player: NBASeasonPlayerStats): NBAPlayerStatistics | null {
-  // Try 'average' first (season stats endpoint)
   if (player.average && typeof player.average.points === 'number') {
     return player.average;
   }
-  // Try 'total' (some endpoints return totals)
   if (player.total && typeof player.total.points === 'number') {
     return player.total;
   }
-  // Try direct 'statistics' field (boxscore-like structure)
   const anyPlayer = player as NBASeasonPlayerStats & { statistics?: NBAPlayerStatistics };
   if (anyPlayer.statistics && typeof anyPlayer.statistics.points === 'number') {
     return anyPlayer.statistics;
@@ -227,9 +192,6 @@ function getPlayerStats(player: NBASeasonPlayerStats): NBAPlayerStatistics | nul
   return null;
 }
 
-/**
- * Safely extract numeric value from stats object with multiple field name attempts
- */
 function extractNumber(stats: Record<string, unknown>, ...fieldNames: string[]): number {
   for (const name of fieldNames) {
     const value = stats[name];
@@ -240,84 +202,50 @@ function extractNumber(stats: Record<string, unknown>, ...fieldNames: string[]):
   return 0;
 }
 
-/**
- * Extract field goal percentage from stats object
- * Falls back to calculating from made/attempted if percentage not available
- */
-function extractFgPct(stats: Record<string, unknown>): number {
-  // Try various field names for direct percentage
-  const pctValue = extractNumber(stats, 
-    'field_goals_pct', 'fg_pct', 'fieldGoalsPct', 'fgPct', 
-    'field_goal_pct', 'fg_percentage'
-  );
+function extractPercentage(
+  stats: Record<string, unknown>,
+  pctFields: string[],
+  madeFields: string[],
+  attFields: string[]
+): number {
+  const pctValue = extractNumber(stats, ...pctFields);
   if (pctValue > 0) {
     return normalizePercentage(pctValue);
   }
   
-  // Calculate from made/attempted if available
-  const made = extractNumber(stats, 'field_goals_made', 'fg_made', 'fgm', 'field_goals');
-  const att = extractNumber(stats, 'field_goals_att', 'fg_att', 'fga', 'field_goals_attempted');
-  if (att > 0 && made >= 0) {
-    return (made / att) * 100;
-  }
-  return 0;
+  const made = extractNumber(stats, ...madeFields);
+  const att = extractNumber(stats, ...attFields);
+  return att > 0 && made >= 0 ? (made / att) * 100 : 0;
 }
 
-/**
- * Extract three point percentage from stats object
- * Falls back to calculating from made/attempted if percentage not available  
- */
-function extractThreePtPct(stats: Record<string, unknown>): number {
-  // Try various field names for direct percentage
-  const pctValue = extractNumber(stats,
-    'three_points_pct', 'fg3_pct', 'threePointsPct', 'three_pt_pct',
-    'three_point_pct', 'fg3_percentage', 'three_pct'
+const extractFgPct = (stats: Record<string, unknown>) =>
+  extractPercentage(
+    stats,
+    ['field_goals_pct', 'fg_pct', 'fieldGoalsPct', 'fgPct', 'field_goal_pct', 'fg_percentage'],
+    ['field_goals_made', 'fg_made', 'fgm', 'field_goals'],
+    ['field_goals_att', 'fg_att', 'fga', 'field_goals_attempted']
   );
-  if (pctValue > 0) {
-    return normalizePercentage(pctValue);
-  }
-  
-  // Calculate from made/attempted if available
-  const made = extractNumber(stats, 'three_points_made', 'fg3_made', 'three_pt_made', 'fg3m', 'threes_made');
-  const att = extractNumber(stats, 'three_points_att', 'fg3_att', 'three_pt_att', 'fg3a', 'threes_attempted');
-  if (att > 0 && made >= 0) {
-    return (made / att) * 100;
-  }
-  return 0;
-}
 
-/**
- * Extract field goals made from stats
- */
-function extractFgMade(stats: Record<string, unknown>): number {
-  return extractNumber(stats, 'field_goals_made', 'fg_made', 'fgm', 'field_goals');
-}
+const extractThreePtPct = (stats: Record<string, unknown>) =>
+  extractPercentage(
+    stats,
+    ['three_points_pct', 'fg3_pct', 'threePointsPct', 'three_pt_pct', 'three_point_pct', 'fg3_percentage', 'three_pct'],
+    ['three_points_made', 'fg3_made', 'three_pt_made', 'fg3m', 'threes_made'],
+    ['three_points_att', 'fg3_att', 'three_pt_att', 'fg3a', 'threes_attempted']
+  );
 
-/**
- * Extract field goals attempted from stats
- */
-function extractFgAtt(stats: Record<string, unknown>): number {
-  return extractNumber(stats, 'field_goals_att', 'fg_att', 'fga', 'field_goals_attempted');
-}
+const extractFgMade = (stats: Record<string, unknown>) =>
+  extractNumber(stats, 'field_goals_made', 'fg_made', 'fgm', 'field_goals');
 
-/**
- * Extract three pointers made from stats
- */
-function extractThreeMade(stats: Record<string, unknown>): number {
-  return extractNumber(stats, 'three_points_made', 'fg3_made', 'three_pt_made', 'fg3m', 'threes_made');
-}
+const extractFgAtt = (stats: Record<string, unknown>) =>
+  extractNumber(stats, 'field_goals_att', 'fg_att', 'fga', 'field_goals_attempted');
 
-/**
- * Extract three pointers attempted from stats
- */
-function extractThreeAtt(stats: Record<string, unknown>): number {
-  return extractNumber(stats, 'three_points_att', 'fg3_att', 'three_pt_att', 'fg3a', 'threes_attempted');
-}
+const extractThreeMade = (stats: Record<string, unknown>) =>
+  extractNumber(stats, 'three_points_made', 'fg3_made', 'three_pt_made', 'fg3m', 'threes_made');
 
-/**
- * Extract and normalize player stats from team seasonal stats (pre-game)
- * Season stats use 'average' and 'total' fields instead of 'statistics'
- */
+const extractThreeAtt = (stats: Record<string, unknown>) =>
+  extractNumber(stats, 'three_points_att', 'fg3_att', 'three_pt_att', 'fg3a', 'threes_attempted');
+
 function extractPlayerStatsFromSeasonStats(
   teamStats: NBATeamSeasonalStats,
   team: 'home' | 'away',
@@ -327,18 +255,14 @@ function extractPlayerStatsFromSeasonStats(
     return [];
   }
 
-  // Calculate team's average points per game for impact calculation
   const teamAvgPoints = teamStats.statistics?.average?.points || 100;
-
   const players: PlayerGameStats[] = [];
 
   for (const player of teamStats.players) {
     const stats = getPlayerStats(player);
     if (!stats) continue;
 
-    // Cast stats to allow flexible field access
     const statsObj = stats as unknown as Record<string, unknown>;
-
     const playerName = player.full_name || `${player.first_name} ${player.last_name}`;
     const injuredPlayer = findPlayerInjury(player.id, playerName, injuries ?? null);
     const primaryInjury = injuredPlayer?.injuries?.[0];
@@ -348,7 +272,6 @@ function extractPlayerStatsFromSeasonStats(
       name: playerName,
       team,
       teamAlias: teamStats.alias,
-      // For season stats, these are averages per game
       points: extractNumber(statsObj, 'points', 'pts', 'ppg') || 0,
       fieldGoalPct: extractFgPct(statsObj),
       threePointPct: extractThreePtPct(statsObj),
@@ -360,7 +283,7 @@ function extractPlayerStatsFromSeasonStats(
       personalFouls: extractNumber(statsObj, 'personal_fouls', 'pf', 'fouls') || 0,
       plusMinus: extractNumber(statsObj, 'plus_minus', 'pls_min', 'pm') || 0,
       minutes: (statsObj.minutes as string) || (statsObj.min as string) || '0:00',
-      onCourt: false, // Not applicable for season stats
+      onCourt: false,
       bettingImpact: 'low',
       fieldGoalsMade: extractFgMade(statsObj),
       fieldGoalsAttempted: extractFgAtt(statsObj),
@@ -371,20 +294,15 @@ function extractPlayerStatsFromSeasonStats(
       isInjured: !!injuredPlayer,
     };
 
-    // Calculate betting impact based on season averages
     playerStats.bettingImpact = calculateBettingImpact(playerStats, teamAvgPoints);
     players.push(playerStats);
   }
 
-  // Sort by points by default and take top 15 players
   return players
     .sort((a, b) => b.points - a.points)
     .slice(0, 15);
 }
 
-/**
- * Sort players by a given field and direction
- */
 function sortPlayers(
   players: PlayerGameStats[],
   field: SortField,
@@ -400,14 +318,12 @@ function sortPlayers(
         bValue = b.points;
         break;
       case 'fieldGoalPct':
-        // Only consider players with at least 5 attempts (or for season avg, any attempts)
         if (a.fieldGoalsAttempted < (a.isSeasonAverage ? 1 : 5)) aValue = -1;
         else aValue = a.fieldGoalPct;
         if (b.fieldGoalsAttempted < (b.isSeasonAverage ? 1 : 5)) bValue = -1;
         else bValue = b.fieldGoalPct;
         break;
       case 'threePointPct':
-        // Only consider players with at least 3 attempts (or for season avg, any attempts)
         if (a.threePointsAttempted < (a.isSeasonAverage ? 1 : 3)) aValue = -1;
         else aValue = a.threePointPct;
         if (b.threePointsAttempted < (b.isSeasonAverage ? 1 : 3)) bValue = -1;
@@ -426,7 +342,6 @@ function sortPlayers(
         bValue = b.plusMinus;
         break;
       case 'minutes':
-        // Parse minutes string (e.g., "25:30" -> 25.5)
         const parseMinutes = (minStr: string): number => {
           const parts = minStr.split(':');
           if (parts.length !== 2) return parseFloat(minStr) || 0;
@@ -439,29 +354,18 @@ function sortPlayers(
         return 0;
     }
 
-    if (direction === 'asc') {
-      return aValue - bValue;
-    } else {
-      return bValue - aValue;
-    }
+    return direction === 'asc' ? aValue - bValue : bValue - aValue;
   });
 
   return sorted;
 }
 
-/**
- * Get top scorer for a team
- */
 function getTopScorer(players: PlayerGameStats[]): PlayerGameStats | null {
   if (players.length === 0) return null;
   return sortPlayers(players, 'points', 'desc')[0];
 }
 
-/**
- * Get players with "hot hand" (shooting efficiently) - only for live games
- */
 function getHotHandPlayers(players: PlayerGameStats[]): PlayerGameStats[] {
-  // Hot hand only applies to live game stats, not season averages
   return players.filter(
     player =>
       !player.isSeasonAverage &&
@@ -470,37 +374,33 @@ function getHotHandPlayers(players: PlayerGameStats[]): PlayerGameStats[] {
   );
 }
 
-/**
- * Determine if game is live or completed (use boxscore) vs scheduled (use season stats)
- */
 function isGameLiveOrCompleted(game: MatchPanelGame | null): boolean {
   if (!game) return false;
   return game.isLive || game.status === 'complete' || game.status === 'closed';
 }
 
 export function useGameStats(options: UseGameStatsOptions): UseGameStatsResult {
-  const { gameId, game, autoRefresh = true, homeInjuries, awayInjuries } = options;
+  const { gameId, game, autoRefresh = true, homeInjuries, awayInjuries, preferSeasonStats = false } = options;
+  const queryClient = useQueryClient();
   
-  const shouldUseBoxscore = isGameLiveOrCompleted(game);
+  const isLiveOrCompleted = isGameLiveOrCompleted(game);
+  const shouldUseBoxscore = isLiveOrCompleted && !preferSeasonStats;
   const homeTeamId = game?.home.team.id;
   const awayTeamId = game?.away.team.id;
 
-  // Fetch boxscore data for live/completed games
-  const {
-    data: boxscore,
-    isLoading: boxscoreLoading,
-    error: boxscoreError,
-  } = useQuery<NBAGameSummary, Error>({
+  const boxscoreQuery = useQuery<NBAGameSummary, Error>({
     queryKey: ['nba-game-boxscore', gameId],
     queryFn: () => {
       if (!gameId) throw new Error('No game ID provided');
       return getNBAGameBoxscore(gameId);
     },
     enabled: !!gameId && shouldUseBoxscore,
-    staleTime: 15 * 1000, // 15 seconds for live game data
+    staleTime: 0,
+    gcTime: 5 * 60 * 1000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
     refetchInterval: (query) => {
       if (!autoRefresh || !gameId || !game?.isLive) return false;
-      // Refetch every 15 seconds if game is live
       const data = query.state.data;
       if (data && (data.status === 'inprogress' || data.status === 'halftime')) {
         return 15 * 1000;
@@ -509,7 +409,25 @@ export function useGameStats(options: UseGameStatsOptions): UseGameStatsResult {
     },
   });
 
-  // Fetch season stats for both teams (always fetch for fallback support)
+  const {
+    data: boxscore,
+    isLoading: boxscoreLoading,
+    error: boxscoreError,
+    refetch: refetchBoxscore,
+  } = boxscoreQuery;
+
+  const [prevShouldUseBoxscore, setPrevShouldUseBoxscore] = useState(shouldUseBoxscore);
+  
+  useEffect(() => {
+    if (shouldUseBoxscore && !prevShouldUseBoxscore && gameId) {
+      queryClient.removeQueries({ queryKey: ['nba-game-boxscore', gameId] });
+      setTimeout(() => {
+        refetchBoxscore();
+      }, 100);
+    }
+    setPrevShouldUseBoxscore(shouldUseBoxscore);
+  }, [shouldUseBoxscore, prevShouldUseBoxscore, gameId, refetchBoxscore, queryClient]);
+
   const seasonStatsQueries = useQueries({
     queries: [
       {
@@ -519,8 +437,8 @@ export function useGameStats(options: UseGameStatsOptions): UseGameStatsResult {
           return getNBATeamStats(homeTeamId);
         },
         enabled: !!homeTeamId,
-        staleTime: 10 * 60 * 1000, // 10 minutes - season stats don't change often
-        gcTime: 30 * 60 * 1000, // 30 minutes cache
+        staleTime: 10 * 60 * 1000,
+        gcTime: 30 * 60 * 1000,
       },
       {
         queryKey: ['nba-team-season-stats', awayTeamId],
@@ -540,35 +458,47 @@ export function useGameStats(options: UseGameStatsOptions): UseGameStatsResult {
   const seasonStatsLoading = seasonStatsQueries.some(q => q.isLoading);
   const seasonStatsError = seasonStatsQueries.find(q => q.error)?.error as Error | undefined;
 
-  // Extract and process player stats based on game status
   const { homePlayers, awayPlayers, isSeasonStats } = useMemo(() => {
-    // Live or completed game: use boxscore
-    if (shouldUseBoxscore && boxscore) {
-      const home = extractPlayerStatsFromBoxscore(boxscore, 'home', homeInjuries);
-      const away = extractPlayerStatsFromBoxscore(boxscore, 'away', awayInjuries);
-      
-      // If boxscore has players, use them
-      if (home.length > 0 || away.length > 0) {
+    if (preferSeasonStats || !isLiveOrCompleted) {
+      if (homeSeasonStats || awaySeasonStats) {
+        const home = homeSeasonStats 
+          ? extractPlayerStatsFromSeasonStats(homeSeasonStats, 'home', homeInjuries)
+          : [];
+        const away = awaySeasonStats
+          ? extractPlayerStatsFromSeasonStats(awaySeasonStats, 'away', awayInjuries)
+          : [];
+        return { homePlayers: home, awayPlayers: away, isSeasonStats: true };
+      }
+      return { homePlayers: [], awayPlayers: [], isSeasonStats: true };
+    }
+    
+    if (shouldUseBoxscore) {
+      if (boxscore) {
+        const home = extractPlayerStatsFromBoxscore(boxscore, 'home', homeInjuries);
+        const away = extractPlayerStatsFromBoxscore(boxscore, 'away', awayInjuries);
+        
+        if (home.length > 0 || away.length > 0) {
+          return { homePlayers: home, awayPlayers: away, isSeasonStats: false };
+        }
+        
+        if (homeSeasonStats || awaySeasonStats) {
+          const homeFallback = homeSeasonStats 
+            ? extractPlayerStatsFromSeasonStats(homeSeasonStats, 'home', homeInjuries)
+            : [];
+          const awayFallback = awaySeasonStats
+            ? extractPlayerStatsFromSeasonStats(awaySeasonStats, 'away', awayInjuries)
+            : [];
+          if (homeFallback.length > 0 || awayFallback.length > 0) {
+            return { homePlayers: homeFallback, awayPlayers: awayFallback, isSeasonStats: true };
+          }
+        }
+        
         return { homePlayers: home, awayPlayers: away, isSeasonStats: false };
       }
       
-      // Fallback: if boxscore has no player data, try season stats
-      if (homeSeasonStats || awaySeasonStats) {
-        const homeFallback = homeSeasonStats 
-          ? extractPlayerStatsFromSeasonStats(homeSeasonStats, 'home', homeInjuries)
-          : [];
-        const awayFallback = awaySeasonStats
-          ? extractPlayerStatsFromSeasonStats(awaySeasonStats, 'away', awayInjuries)
-          : [];
-        if (homeFallback.length > 0 || awayFallback.length > 0) {
-          return { homePlayers: homeFallback, awayPlayers: awayFallback, isSeasonStats: true };
-        }
-      }
-      
-      return { homePlayers: home, awayPlayers: away, isSeasonStats: false };
+      return { homePlayers: [], awayPlayers: [], isSeasonStats: false };
     }
     
-    // Pre-game: use season stats
     if (homeSeasonStats || awaySeasonStats) {
       const home = homeSeasonStats 
         ? extractPlayerStatsFromSeasonStats(homeSeasonStats, 'home', homeInjuries)
@@ -580,17 +510,15 @@ export function useGameStats(options: UseGameStatsOptions): UseGameStatsResult {
     }
 
     return { homePlayers: [], awayPlayers: [], isSeasonStats: false };
-  }, [shouldUseBoxscore, boxscore, homeSeasonStats, awaySeasonStats, homeInjuries, awayInjuries]);
+  }, [shouldUseBoxscore, preferSeasonStats, isLiveOrCompleted, boxscore, homeSeasonStats, awaySeasonStats, homeInjuries, awayInjuries]);
 
-  // Determine loading and error states
-  // For live/completed games: loading if boxscore is loading OR (no boxscore players AND season stats loading)
-  // For pre-game: loading if season stats are loading
   const isLoading = shouldUseBoxscore 
-    ? boxscoreLoading || ((!boxscore?.home?.players?.length && !boxscore?.away?.players?.length) && seasonStatsLoading)
+    ? boxscoreLoading || (boxscoreQuery.isEnabled && !boxscore && !boxscoreError && boxscoreQuery.status === 'pending')
     : seasonStatsLoading;
   
-  // Only show error if primary data source fails
-  const error = shouldUseBoxscore ? boxscoreError : seasonStatsError;
+  const error: Error | null = shouldUseBoxscore 
+    ? (boxscoreError || null) 
+    : (seasonStatsError || null);
 
   return {
     homePlayers,

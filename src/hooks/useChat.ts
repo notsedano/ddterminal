@@ -1,9 +1,3 @@
-/**
- * Chat Hook
- * Manages chat messages with hybrid storage (Supabase + IndexedDB)
- * Includes memory context for personalized interactions
- */
-
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { sendMessage as sendMessageAPI } from '@/services/api/messages';
@@ -28,8 +22,9 @@ import { useSocket } from './useSocket';
 import { useAuth } from './useAuth';
 import { useMemory, useMemoryExtraction } from './useMemory';
 import { getUserId } from '@/utils/storage';
-import { convertApiMessageToMessage, mergeMessages } from '@/utils/messageUtils';
+import { convertApiMessageToMessage, mergeMessages, isMessageRelated } from '@/utils/messageUtils';
 import { createSSEStream, type SSEChunkEvent, type SSEMessageEvent } from '@/utils/sse';
+import { captureError } from '@/utils/errorTracking';
 import type { Message } from '@/types';
 import type { KnowledgeSearchResult } from '@/types/knowledge';
 
@@ -38,55 +33,78 @@ export interface UseChatOptions {
   agentId: string;
   roomId: string;
   onSessionInvalid?: (sessionId: string) => void;
-  /** Enable memory context loading for personalized interactions */
   enableMemory?: boolean;
-  /** Enable knowledge context from session articles for RAG */
   enableKnowledge?: boolean;
 }
 
-/**
- * Ensure session exists in Supabase before saving messages
- * This handles the case where a session was created before auth was ready
- */
 async function ensureSessionInSupabase(
   sessionId: string,
   supabaseUserId: string
-): Promise<void> {
-  // Check if session exists in Supabase
+): Promise<boolean> {
   const supabaseSession = await getSessionFromSupabase(sessionId);
+  if (supabaseSession) return true;
   
-  if (!supabaseSession) {
-    // Session doesn't exist in Supabase - try to get it from local storage and save it
-    const localSession = await getLocalSession(sessionId);
-    
-    if (localSession) {
-      console.log(`[useChat] Session ${sessionId.slice(0, 8)}... not in Supabase, saving from local storage`);
-      await saveSessionToSupabase(localSession, supabaseUserId);
-    } else {
-      // Session doesn't exist locally either - this shouldn't happen
-      console.warn(`[useChat] Session ${sessionId.slice(0, 8)}... not found in local storage or Supabase`);
+  let session = await getLocalSession(sessionId);
+  
+  if (!session) {
+    try {
+      const { getSession } = await import('@/services/api/sessions');
+      session = await getSession(sessionId);
+    } catch (error) {
+      console.warn(`[useChat] Session ${sessionId.slice(0, 8)}... not found:`, error);
+      captureError(error instanceof Error ? error : new Error(String(error)), {
+        component: 'useChat',
+        action: 'ensureSessionInSupabase',
+        sessionId,
+        metadata: { step: 'fetchFromAPI' },
+      });
     }
   }
+  
+  if (session) {
+    try {
+      await saveSessionToSupabase(session, supabaseUserId);
+      return true;
+    } catch (error) {
+      console.error(`[useChat] Failed to save session:`, error);
+      captureError(error instanceof Error ? error : new Error(String(error)), {
+        component: 'useChat',
+        action: 'ensureSessionInSupabase',
+        sessionId,
+        metadata: { step: 'saveToSupabase', supabaseUserId },
+      });
+      return false;
+    }
+  }
+  
+  return false;
 }
 
-/**
- * Save message to both local and Supabase storage
- */
 async function saveMessage(
   message: Message,
   supabaseUserId: string | null,
   isAuthenticated: boolean
 ): Promise<void> {
-  // Always save locally for offline support
   await saveLocalMessage(message);
 
-  // Save to Supabase if authenticated
   if (isAuthenticated && supabaseUserId && isSupabaseConfigured()) {
-    // Ensure session exists in Supabase first (handles race condition where
-    // session was created before supabaseUserId was populated)
-    await ensureSessionInSupabase(message.sessionId, supabaseUserId);
-    
-    await saveMessageToSupabase(message, supabaseUserId);
+    try {
+      const sessionExists = await ensureSessionInSupabase(message.sessionId, supabaseUserId);
+      if (!sessionExists) {
+        console.warn(`[useChat] Skipping Supabase save - session doesn't exist`);
+        return;
+      }
+      await saveMessageToSupabase(message, supabaseUserId);
+    } catch (error) {
+      console.error(`[useChat] Failed to save message to Supabase:`, error);
+      captureError(error instanceof Error ? error : new Error(String(error)), {
+        component: 'useChat',
+        action: 'saveMessage',
+        sessionId: message.sessionId,
+        userId: supabaseUserId || undefined,
+        metadata: { messageId: message.id, role: message.role },
+      });
+    }
   }
 }
 
@@ -95,23 +113,20 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
   const [streamingMessage, setStreamingMessage] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [knowledgeContext, setKnowledgeContext] = useState<KnowledgeSearchResult[]>([]);
-  const [sseConnected, setSseConnected] = useState(false); // Track actual SSE connection state
+  const [sseConnected, setSseConnected] = useState(false);
   const isNewSessionRef = useRef(true);
   const userId = getUserId();
   const { isAuthenticated, supabaseUserId, isLoading: isAuthLoading } = useAuth();
 
-  // Track which session we've loaded to prevent duplicate loads
   const loadedSessionRef = useRef<string | null>(null);
   const isLoadingRef = useRef(false);
 
-  // Use refs to avoid recreation of callbacks when auth state changes
   const authStateRef = useRef({ isAuthenticated, supabaseUserId });
   authStateRef.current = { isAuthenticated, supabaseUserId };
   
   const onSessionInvalidRef = useRef(onSessionInvalid);
   onSessionInvalidRef.current = onSessionInvalid;
 
-  // Memory context for personalized interactions
   const {
     context: memoryContext,
     contextPrompt: memoryContextPrompt,
@@ -125,10 +140,8 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
     enabled: enableMemory,
   });
 
-  // Memory extraction for learning from conversations
   const { extractEntities, saveFact, saveIntent, summarizeConversation } = useMemoryExtraction(agentId, sessionId);
 
-  // Check if session has knowledge articles
   const { data: hasKnowledge = false } = useQuery({
     queryKey: ['session-has-knowledge', sessionId],
     queryFn: () => sessionHasKnowledge(sessionId!),
@@ -136,12 +149,10 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
     staleTime: 30_000,
   });
 
-  // Socket.IO connection - optional for bidirectional features (non-blocking)
-  // SSE is used for streaming instead
   useSocket({
     agentId,
     roomId,
-    enabled: false, // Disabled - using SSE for streaming instead
+    enabled: false,
   });
 
   const sendMessageMutation = useMutation({
@@ -156,6 +167,12 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
           })
           .catch((err) => {
             console.warn('[useChat] Knowledge search failed:', err);
+            captureError(err instanceof Error ? err : new Error(String(err)), {
+              component: 'useChat',
+              action: 'searchKnowledge',
+              sessionId: sessionId || undefined,
+              metadata: { query: text.substring(0, 100) },
+            });
           });
       }
 
@@ -173,17 +190,38 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
         role: 'user',
       };
 
+      lastUserMessageRef.current = {
+        text,
+        timestamp: Date.now(),
+      };
+      lastAgentMessageTimeRef.current = 0;
+      hasReceivedAgentResponseRef.current = false;
+
       await saveMessage(userMessage, supabaseUserId, isAuthenticated);
       setMessages((prev) => [...prev, userMessage]);
 
-      // Track interaction and extract memories (non-blocking)
       if (enableMemory && isAuthenticated && supabaseUserId) {
-        // Track as new session if this is the first message
-        trackInteraction(1, isNewSessionRef.current).catch(console.error);
+        trackInteraction(1, isNewSessionRef.current).catch((err) => {
+          console.error('[useChat] Failed to track interaction:', err);
+          captureError(err instanceof Error ? err : new Error(String(err)), {
+            component: 'useChat',
+            action: 'trackInteraction',
+            sessionId,
+            userId: supabaseUserId || undefined,
+            metadata: { isNewSession: isNewSessionRef.current },
+          });
+        });
         isNewSessionRef.current = false;
-
-        // Extract entities and save memories from user message
-        extractEntities(text, response.messageId).catch(console.error);
+        extractEntities(text, response.messageId).catch((err) => {
+          console.error('[useChat] Failed to extract entities:', err);
+          captureError(err instanceof Error ? err : new Error(String(err)), {
+            component: 'useChat',
+            action: 'extractEntities',
+            sessionId,
+            userId: supabaseUserId || undefined,
+            metadata: { messageId: response.messageId },
+          });
+        });
       }
 
       return response;
@@ -191,6 +229,14 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
     onError: (error) => {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error('Failed to send message:', error);
+      captureError(error instanceof Error ? error : new Error(String(error)), {
+        component: 'useChat',
+        action: 'sendMessage',
+        sessionId: sessionId || undefined,
+        userId,
+        agentId,
+        metadata: { errorMessage },
+      });
 
       // Check if session is invalid/not found
       if (
@@ -208,7 +254,6 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
     onSuccess: async () => {
       if (!sessionId) return;
 
-      // Poll for agent response (fallback when WebSocket unavailable)
       const pollForMessages = async () => {
         try {
           const messagesResponse = await getMessagesAPI(sessionId);
@@ -219,23 +264,22 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
           );
 
           setMessages((prev) => mergeMessages(prev, apiMessages));
-
-          // Save new messages to storage
           await Promise.all(
             apiMessages.map((m) => saveMessage(m, supabaseUserId, isAuthenticated))
           );
         } catch (error) {
           console.error('Error fetching messages:', error);
+          captureError(error instanceof Error ? error : new Error(String(error)), {
+            component: 'useChat',
+            action: 'pollForMessages',
+            sessionId,
+            metadata: { source: 'REST_API' },
+          });
         }
       };
 
-      // Initial fetch after delay
       const initialTimeout = setTimeout(pollForMessages, 2000);
-
-      // Poll periodically
       const pollInterval = setInterval(pollForMessages, 5000);
-
-      // Clear polling after 30 seconds
       setTimeout(() => {
         clearTimeout(initialTimeout);
         clearInterval(pollInterval);
@@ -243,20 +287,39 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
     },
   });
 
-  // Ref to track current streaming message for onDone handler
   const streamingMessageRef = useRef('');
   useEffect(() => {
     streamingMessageRef.current = streamingMessage;
   }, [streamingMessage]);
 
-  // SSE connection for streaming AI responses
-  useEffect(() => {
-    if (!sessionId || !agentId || !roomId) {
-      console.log('[useChat] Skipping SSE - missing required params:', { sessionId: !!sessionId, agentId: !!agentId, roomId: !!roomId });
-      return;
+  const lastUserMessageRef = useRef<{ text: string; timestamp: number } | null>(null);
+  const lastAgentMessageTimeRef = useRef<number>(0);
+  const hasReceivedAgentResponseRef = useRef<boolean>(false);
+  
+  const shouldFilterMessage = useCallback((
+    agentText: string,
+    now: number,
+    _existingMessages: Message[]
+  ): boolean => {
+    const lastUserMsg = lastUserMessageRef.current;
+    if (!lastUserMsg) return false;
+    
+    const timeSinceUserMessage = now - lastUserMsg.timestamp;
+    const timeSinceLastAgent = now - lastAgentMessageTimeRef.current;
+    const related = isMessageRelated(agentText, lastUserMsg.text);
+    
+    if (hasReceivedAgentResponseRef.current && !related && timeSinceUserMessage < 60000) {
+      return true;
     }
+    if (timeSinceLastAgent < 5000 && !related) {
+      return true;
+    }
+    
+    return false;
+  }, []);
 
-    console.log('[useChat] Setting up SSE stream for streaming responses', { agentId, roomId, sessionId });
+  useEffect(() => {
+    if (!sessionId || !agentId || !roomId) return;
 
     const cleanup = createSSEStream(agentId, roomId, {
       onChunk: (data: SSEChunkEvent) => {
@@ -270,92 +333,145 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
         }
       },
       onMessage: (data: SSEMessageEvent) => {
-        // Handle complete message (alternative to chunk-based streaming)
-        if (data.text) {
-          const agentMessage: Message = {
-            id: data.messageId || `agent-${Date.now()}-${Math.random()}`,
-            text: data.text,
-            userId: data.agentId,
-            agentId: data.agentId,
-            sessionId: data.sessionId || sessionId,
-            createdAt: data.timestamp || new Date().toISOString(),
-            role: 'agent',
-          };
-
-          setMessages((prev) => {
-            const lastMessage = prev[prev.length - 1];
-            // Replace streaming message if it exists
-            if (lastMessage?.role === 'agent' && lastMessage.id.startsWith('agent-')) {
-              return [...prev.slice(0, -1), agentMessage];
-            }
-            return [...prev, agentMessage];
+        if (!data.text) return;
+        
+        const now = Date.now();
+        const messageId = data.messageId || `agent-${Date.now()}-${Math.random()}`;
+        
+        const agentMessage: Message = {
+          id: messageId,
+          text: data.text,
+          userId: data.agentId,
+          agentId: data.agentId,
+          sessionId: data.sessionId || sessionId,
+          createdAt: data.timestamp || new Date().toISOString(),
+          role: 'agent',
+        };
+        
+        setMessages((prev) => {
+          // Check for duplicate ID
+          if (prev.some(m => m.id === messageId)) {
+            return prev;
+          }
+          
+          // Check if should be filtered
+          if (shouldFilterMessage(data.text, now, prev)) {
+            return prev;
+          }
+          
+          // Merge and add message
+          const merged = mergeMessages(prev, [agentMessage]);
+          const lastMessage = merged[merged.length - 1];
+          
+          // Replace streaming message if exists
+          if (lastMessage?.role === 'agent' && lastMessage.id.startsWith('agent-streaming-')) {
+            return [...merged.slice(0, -1), agentMessage];
+          }
+          
+          return merged;
+        });
+        
+        // Update tracking and save
+        lastAgentMessageTimeRef.current = now;
+        hasReceivedAgentResponseRef.current = true;
+        setStreamingMessage('');
+        streamingMessageRef.current = '';
+        
+        const { isAuthenticated: auth, supabaseUserId: sbId } = authStateRef.current;
+        saveMessage(agentMessage, sbId, auth).catch((err) => {
+          console.error('[useChat] Failed to save streaming message:', err);
+          captureError(err instanceof Error ? err : new Error(String(err)), {
+            component: 'useChat',
+            action: 'saveStreamingMessage',
+            sessionId: sessionId || undefined,
+            userId: sbId || undefined,
+            metadata: { messageId: agentMessage.id, source: 'SSE_done' },
           });
-
-          const { isAuthenticated: auth, supabaseUserId: sbId } = authStateRef.current;
-          saveMessage(agentMessage, sbId, auth);
-          setStreamingMessage('');
-          streamingMessageRef.current = '';
-        }
+        });
       },
       onError: (error) => {
         console.error('[useChat] SSE error:', error);
-        setSseConnected(false); // Mark as disconnected on error
-        
-        // If endpoint doesn't exist (404), log a helpful message but don't show error to user
+        setSseConnected(false);
         if (error.code === 'ENDPOINT_NOT_FOUND') {
           console.warn('[useChat] SSE endpoint not available - falling back to REST API polling');
-          // SSE is optional - REST API polling will handle message delivery
+        } else {
+          captureError(error instanceof Error ? error : new Error(String(error)), {
+            component: 'useChat',
+            action: 'SSE_connection',
+            sessionId: sessionId || undefined,
+            agentId,
+            metadata: { errorCode: error.code, roomId },
+          });
         }
-        // Don't set error state - SSE failures are non-critical, REST polling will handle it
       },
       onDone: () => {
-        // Stream complete - finalize any pending streaming message
         const currentStreaming = streamingMessageRef.current;
-        if (currentStreaming) {
-          const agentMessage: Message = {
-            id: `agent-${Date.now()}-${Math.random()}`,
-            text: currentStreaming,
-            userId: agentId,
-            agentId,
-            sessionId: sessionId || '',
-            createdAt: new Date().toISOString(),
-            role: 'agent',
-          };
+        if (!currentStreaming) return;
+        
+        const now = Date.now();
+        
+        setMessages((prev) => {
+          if (shouldFilterMessage(currentStreaming, now, prev)) {
+            setStreamingMessage('');
+            streamingMessageRef.current = '';
+            return prev;
+          }
+          return prev;
+        });
+        
+        if (!streamingMessageRef.current) return;
+        
+        const agentMessage: Message = {
+          id: `agent-${Date.now()}-${Math.random()}`,
+          text: currentStreaming,
+          userId: agentId,
+          agentId,
+          sessionId: sessionId || '',
+          createdAt: new Date().toISOString(),
+          role: 'agent',
+        };
 
-          setMessages((prev) => {
-            const lastMessage = prev[prev.length - 1];
-            if (lastMessage?.role === 'agent' && lastMessage.id.startsWith('agent-')) {
-              return [...prev.slice(0, -1), agentMessage];
-            }
-            return [...prev, agentMessage];
+        setMessages((prev) => {
+          const merged = mergeMessages(prev, [agentMessage]);
+          const lastMessage = merged[merged.length - 1];
+          if (lastMessage?.role === 'agent' && lastMessage.id.startsWith('agent-streaming-')) {
+            return [...merged.slice(0, -1), agentMessage];
+          }
+          return merged;
+        });
+
+        lastAgentMessageTimeRef.current = now;
+        hasReceivedAgentResponseRef.current = true;
+        const { isAuthenticated: auth, supabaseUserId: sbId } = authStateRef.current;
+        saveMessage(agentMessage, sbId, auth).catch((err) => {
+          console.error('[useChat] Failed to save streaming message:', err);
+          captureError(err instanceof Error ? err : new Error(String(err)), {
+            component: 'useChat',
+            action: 'saveStreamingMessage',
+            sessionId: sessionId || undefined,
+            userId: sbId || undefined,
+            metadata: { messageId: agentMessage.id, source: 'SSE_done' },
           });
-
-          const { isAuthenticated: auth, supabaseUserId: sbId } = authStateRef.current;
-          saveMessage(agentMessage, sbId, auth);
-          setStreamingMessage('');
-          streamingMessageRef.current = '';
-        }
+        });
+        setStreamingMessage('');
+        streamingMessageRef.current = '';
       },
       onOpen: () => {
-        console.log('[useChat] ✅ SSE stream opened - using SSE for real-time streaming');
-        setSseConnected(true); // Mark as connected
+        setSseConnected(true);
       },
       onClose: () => {
-        console.log('[useChat] SSE stream closed');
-        setSseConnected(false); // Mark as disconnected
+        setSseConnected(false);
       },
     });
 
     return cleanup;
   }, [sessionId, agentId, roomId]);
 
-  // Update UI with streaming message chunks (debounced to avoid too many re-renders)
   useEffect(() => {
     if (!streamingMessage) return;
 
-    // Create/update streaming message in UI
     const agentMessage: Message = {
-      id: `agent-streaming-${sessionId}`, // Use consistent ID for streaming message
+      id: `agent-streaming-${sessionId}`,
       text: streamingMessage,
       userId: agentId,
       agentId,
@@ -366,7 +482,6 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
 
     setMessages((prev) => {
       const lastMessage = prev[prev.length - 1];
-      // Replace existing streaming message or add new one
       if (lastMessage?.id === `agent-streaming-${sessionId}`) {
         return [...prev.slice(0, -1), agentMessage];
       }
@@ -374,9 +489,7 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
     });
   }, [streamingMessage, agentId, sessionId]);
 
-  // Load messages - called once per session
   useEffect(() => {
-    // Skip if no session, auth is loading, already loading, or already loaded this session
     if (!sessionId || isAuthLoading || isLoadingRef.current) return;
     if (loadedSessionRef.current === sessionId) return;
 
@@ -387,31 +500,52 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
       const { isAuthenticated: isAuth, supabaseUserId: sbUserId } = authStateRef.current;
       let loaded = false;
 
-      // Try to load from Supabase first if authenticated
       if (isAuth && sbUserId && isSupabaseConfigured()) {
-        const supabaseMessages = await getMessagesFromSupabase(sessionId).catch(() => []);
+        const supabaseMessages = await getMessagesFromSupabase(sessionId).catch((err) => {
+          console.warn('[useChat] Failed to load from Supabase:', err);
+          captureError(err instanceof Error ? err : new Error(String(err)), {
+            component: 'useChat',
+            action: 'loadMessages',
+            sessionId,
+            userId: sbUserId || undefined,
+            metadata: { source: 'Supabase' },
+          });
+          return [];
+        });
         if (supabaseMessages.length > 0) {
           setMessages(supabaseMessages);
           loaded = true;
-          // Also sync to local storage (non-blocking)
-          Promise.all(supabaseMessages.map(saveLocalMessage)).catch(() => {});
+          Promise.all(supabaseMessages.map(saveLocalMessage)).catch((err) => {
+            console.warn('[useChat] Failed to sync to local:', err);
+            captureError(err instanceof Error ? err : new Error(String(err)), {
+              component: 'useChat',
+              action: 'syncToLocal',
+              sessionId,
+              metadata: { messageCount: supabaseMessages.length },
+            });
+          });
         }
       }
 
-      // Then try local storage (only if we haven't loaded from Supabase)
       if (!loaded) {
-        const stored = await getStoredMessages(sessionId).catch(() => []);
+        const stored = await getStoredMessages(sessionId).catch((err) => {
+          console.warn('[useChat] Failed to load from local:', err);
+          captureError(err instanceof Error ? err : new Error(String(err)), {
+            component: 'useChat',
+            action: 'loadMessages',
+            sessionId,
+            metadata: { source: 'localStorage' },
+          });
+          return [];
+        });
         if (stored.length > 0) {
           setMessages(stored);
           loaded = true;
         }
       }
 
-      // Then fetch from API to get latest messages (only once)
       const messagesResponse = await getMessagesAPI(sessionId).catch((err) => {
         const errorMessage = err instanceof Error ? err.message : String(err);
-
-        // Check if session is invalid or Sessions API unavailable
         if (
           err instanceof SessionNotFoundError ||
           errorMessage.includes('not found') ||
@@ -420,10 +554,15 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
           errorMessage.includes('404') ||
           errorMessage.includes('400')
         ) {
-          console.warn(`[useChat] Session ${sessionId.slice(0, 8)}... not found on backend`);
           onSessionInvalidRef.current?.(sessionId);
         } else if (!errorMessage.includes('Too many requests')) {
-          console.error('Error loading messages from API:', err);
+          console.error('Error loading messages:', err);
+          captureError(err instanceof Error ? err : new Error(String(err)), {
+            component: 'useChat',
+            action: 'loadMessages',
+            sessionId,
+            metadata: { source: 'API', errorMessage },
+          });
         }
         return null;
       });
@@ -435,10 +574,18 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
         setMessages(apiMessages);
         
         const { isAuthenticated: currentAuth, supabaseUserId: currentSbId } = authStateRef.current;
-        // Save to storage non-blocking
         Promise.all(
           apiMessages.map((m) => saveMessage(m, currentSbId, currentAuth))
-        ).catch(() => {});
+        ).catch((err) => {
+          console.warn('[useChat] Failed to save API messages:', err);
+          captureError(err instanceof Error ? err : new Error(String(err)), {
+            component: 'useChat',
+            action: 'saveAPIMessages',
+            sessionId,
+            userId: currentSbId || undefined,
+            metadata: { messageCount: apiMessages.length },
+          });
+        });
       }
 
       isLoadingRef.current = false;
@@ -447,13 +594,12 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
     loadMessages();
   }, [sessionId, isAuthLoading, agentId]);
 
-  // Clear messages and reset state when session changes
   useEffect(() => {
     if (sessionId !== loadedSessionRef.current) {
       setMessages([]);
       setStreamingMessage('');
       setError(null);
-      setSseConnected(false); // Reset SSE connection state on session change
+      setSseConnected(false);
       loadedSessionRef.current = null;
       isLoadingRef.current = false;
     }
@@ -467,12 +613,10 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
     [sendMessageMutation, sessionId]
   );
 
-  // Reset new session flag when session changes
   useEffect(() => {
     isNewSessionRef.current = true;
   }, [sessionId]);
 
-  // Format knowledge context for prompt injection
   const knowledgeContextPrompt = knowledgeContext.length > 0
     ? formatSearchResultsForContext(knowledgeContext)
     : '';
@@ -481,15 +625,13 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
     messages,
     sendMessage,
     isSending: sendMessageMutation.isPending,
-    isConnected: sseConnected, // Track actual SSE connection status
-    isTyping: !!streamingMessage, // Typing indicator based on streaming state
+    isConnected: sseConnected,
+    isTyping: !!streamingMessage,
     status: streamingMessage ? 'processing' : 'idle',
     error,
-    // Memory context
     memoryContext,
     memoryContextPrompt,
     isMemoryLoading,
-    // Memory actions for components that need direct access
     memoryActions: {
       saveFact,
       saveIntent,
@@ -497,7 +639,6 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
       updateSummary,
       summarizeConversation,
     },
-    // Knowledge context from session articles
     knowledgeContext,
     knowledgeContextPrompt,
     hasKnowledge,

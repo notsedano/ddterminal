@@ -305,4 +305,232 @@ describe('Integration Tests', () => {
       expect(onSessionInvalid).toHaveBeenCalledWith('expired-session');
     });
   });
+
+  describe('Message Filtering Integration', () => {
+    it('should filter unrelated messages using real isMessageRelated function', async () => {
+      // Import actual function (not mocked)
+      const { isMessageRelated } = await import('@/utils/messageUtils');
+
+      const userText = '🎯 PREDICTION REQUEST\n\nLakers @ Celtics';
+      const relatedAgentText = 'Based on the Lakers and Celtics matchup, I predict...';
+      const unrelatedAgentText = 'The Warriors and Heat game was exciting';
+
+      expect(isMessageRelated(relatedAgentText, userText)).toBe(true);
+      expect(isMessageRelated(unrelatedAgentText, userText)).toBe(false);
+    });
+
+    it('should handle team abbreviation matching in real scenarios', async () => {
+      const { isMessageRelated } = await import('@/utils/messageUtils');
+
+      const userText = '🎯 PREDICTION REQUEST\n\nLAL @ BOS';
+      const agentText = 'The Lakers and Celtics are both strong teams';
+
+      expect(isMessageRelated(agentText, userText)).toBe(true);
+    });
+
+    it('should handle edge cases in message filtering', async () => {
+      const { isMessageRelated } = await import('@/utils/messageUtils');
+
+      // Empty strings
+      expect(isMessageRelated('', '')).toBe(true);
+      
+      // No teams in user message
+      expect(isMessageRelated('Any response', '🎯 PREDICTION REQUEST')).toBe(true);
+      
+      // No teams in agent message
+      expect(
+        isMessageRelated('I need more info', '🎯 PREDICTION REQUEST\n\nLakers @ Celtics')
+      ).toBe(true);
+    });
+  });
+
+  describe('Message Merging Integration', () => {
+    it('should merge messages using real mergeMessages function', async () => {
+      const { mergeMessages } = await import('@/utils/messageUtils');
+      const { Message } = await import('@/types');
+
+      const existing: Message[] = [
+        {
+          id: 'msg-1',
+          text: 'Message 1',
+          userId: 'user-1',
+          sessionId: 'session-1',
+          createdAt: '2024-01-01T10:00:00Z',
+          role: 'user',
+        },
+        {
+          id: 'msg-2',
+          text: 'Message 2',
+          userId: 'user-1',
+          sessionId: 'session-1',
+          createdAt: '2024-01-01T10:01:00Z',
+          role: 'user',
+        },
+      ];
+
+      const newMessages: Message[] = [
+        {
+          id: 'msg-3',
+          text: 'Message 3',
+          userId: 'user-1',
+          sessionId: 'session-1',
+          createdAt: '2024-01-01T10:02:00Z',
+          role: 'user',
+        },
+        {
+          id: 'msg-2', // Duplicate
+          text: 'Message 2',
+          userId: 'user-1',
+          sessionId: 'session-1',
+          createdAt: '2024-01-01T10:01:00Z',
+          role: 'user',
+        },
+      ];
+
+      const result = mergeMessages(existing, newMessages);
+
+      expect(result).toHaveLength(3);
+      expect(result.map(m => m.id)).toEqual(['msg-1', 'msg-2', 'msg-3']);
+    });
+
+    it('should handle out-of-order messages', async () => {
+      const { mergeMessages } = await import('@/utils/messageUtils');
+      const { Message } = await import('@/types');
+
+      const existing: Message[] = [
+        {
+          id: 'msg-2',
+          text: 'Message 2',
+          userId: 'user-1',
+          sessionId: 'session-1',
+          createdAt: '2024-01-01T10:01:00Z',
+          role: 'user',
+        },
+      ];
+
+      const newMessages: Message[] = [
+        {
+          id: 'msg-1',
+          text: 'Message 1',
+          userId: 'user-1',
+          sessionId: 'session-1',
+          createdAt: '2024-01-01T10:00:00Z',
+          role: 'user',
+        },
+        {
+          id: 'msg-3',
+          text: 'Message 3',
+          userId: 'user-1',
+          sessionId: 'session-1',
+          createdAt: '2024-01-01T10:02:00Z',
+          role: 'user',
+        },
+      ];
+
+      const result = mergeMessages(existing, newMessages);
+
+      // Should be sorted by createdAt
+      expect(result.map(m => m.id)).toEqual(['msg-1', 'msg-2', 'msg-3']);
+    });
+  });
+
+  describe('SSE Integration', () => {
+    it('should handle SSE stream lifecycle', async () => {
+      const { createSSEStream } = await import('@/utils/sse');
+
+      const handlers = {
+        onChunk: vi.fn(),
+        onMessage: vi.fn(),
+        onError: vi.fn(),
+        onDone: vi.fn(),
+        onOpen: vi.fn(),
+        onClose: vi.fn(),
+      };
+
+      // Mock fetch for pre-flight
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: {
+          get: () => 'text/event-stream',
+        },
+      });
+
+      // Mock EventSource
+      const mockEventSource = {
+        readyState: 0,
+        addEventListener: vi.fn(),
+        close: vi.fn(),
+      };
+
+      global.EventSource = vi.fn(() => mockEventSource as any) as any;
+
+      const cleanup = createSSEStream('agent-123', 'room-456', handlers);
+
+      // Verify setup
+      expect(global.EventSource).toHaveBeenCalled();
+
+      // Cleanup
+      cleanup();
+      expect(mockEventSource.close).toHaveBeenCalled();
+      expect(handlers.onClose).toHaveBeenCalled();
+    });
+  });
+
+  describe('Real Code Path Integration', () => {
+    it('should exercise complete message flow with real utilities', async () => {
+      const { convertApiMessageToMessage, mergeMessages } = await import('@/utils/messageUtils');
+
+      // Simulate API response
+      const apiMessage = {
+        id: 'api-msg-1',
+        content: 'Hello from API',
+        authorId: 'user-123',
+        isAgent: false,
+        createdAt: '2024-01-01T12:00:00Z',
+      };
+
+      // Convert using real function
+      const converted = convertApiMessageToMessage(apiMessage, 'session-123', 'agent-123');
+
+      expect(converted.id).toBe('api-msg-1');
+      expect(converted.text).toBe('Hello from API');
+      expect(converted.role).toBe('user');
+
+      // Merge with existing
+      const existing = [converted];
+      const newMsg = {
+        ...converted,
+        id: 'api-msg-2',
+        text: 'Second message',
+      };
+
+      const merged = mergeMessages(existing, [newMsg]);
+
+      expect(merged).toHaveLength(2);
+      expect(merged[0].text).toBe('Hello from API');
+      expect(merged[1].text).toBe('Second message');
+    });
+
+    it('should handle boundary conditions in real functions', async () => {
+      const { convertApiMessageToMessage, mergeMessages } = await import('@/utils/messageUtils');
+
+      // Test with minimal data
+      const minimalApiMsg = {
+        isAgent: false,
+      };
+
+      const converted = convertApiMessageToMessage(minimalApiMsg as any, 'session-1', 'agent-1');
+
+      expect(converted.id).toBeTruthy();
+      expect(converted.text).toBe('');
+      expect(converted.userId).toBe('');
+
+      // Test merge with empty arrays
+      const emptyMerge = mergeMessages([], []);
+      expect(emptyMerge).toEqual([]);
+
+      const singleMerge = mergeMessages([], [converted]);
+      expect(singleMerge).toHaveLength(1);
+    });
+  });
 });

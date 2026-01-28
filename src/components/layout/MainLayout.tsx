@@ -9,7 +9,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useNBASchedule } from '@/hooks/useNBASchedule';
 import { cn } from '@/utils/cn';
 import { MatchupSessionProvider, useMatchupSessionContext } from '@/contexts/MatchupSessionContext';
+import { MatchProvider } from '@/contexts/MatchContext';
 import { useAutoMatchupSession } from '@/hooks/useAutoMatchupSession';
+import { captureError } from '@/utils/errorTracking';
 import type { Session } from '@/types';
 
 export interface MainLayoutProps {
@@ -17,26 +19,22 @@ export interface MainLayoutProps {
 }
 
 export function MainLayout({ agentId }: MainLayoutProps) {
-  // Handle when a matchup session is started from MatchPanel
-  const handleMatchupSessionStarted = useCallback((_session: Session) => {
-    // This will be handled by MainLayoutContent via the context
-  }, []);
+  const handleMatchupSessionStarted = useCallback((_session: Session) => {}, []);
 
   return (
-    <MatchupSessionProvider agentId={agentId} onSessionStarted={handleMatchupSessionStarted}>
-      <MainLayoutContent agentId={agentId} />
-    </MatchupSessionProvider>
+    <MatchProvider>
+      <MatchupSessionProvider agentId={agentId} onSessionStarted={handleMatchupSessionStarted}>
+        <MainLayoutContent agentId={agentId} />
+      </MatchupSessionProvider>
+    </MatchProvider>
   );
 }
 
-/**
- * Inner component that has access to MatchupSessionContext
- */
 function MainLayoutContent({ agentId }: { agentId: string }) {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [roomId, setRoomId] = useState<string | null>(null);
   const [showTerminal, setShowTerminal] = useState(false);
-  const [showMatchPanel, setShowMatchPanel] = useState(true); // Default expanded
+  const [showMatchPanel, setShowMatchPanel] = useState(true);
   const [terminalHeight, setTerminalHeight] = useState(300);
   const { data: session } = useSession(currentSessionId);
   const queryClient = useQueryClient();
@@ -44,13 +42,9 @@ function MainLayoutContent({ agentId }: { agentId: string }) {
   const isResizing = useRef(false);
   const terminalResizeRef = useRef<HTMLDivElement>(null);
   
-  // Get live game status for header indicator
   const { liveGames } = useNBASchedule({ autoRefreshLive: showMatchPanel });
-
-  // Get matchup context for auto-session creation
   const matchupContext = useMatchupSessionContext();
 
-  // Auto-create and switch to matchup sessions
   useAutoMatchupSession({
     enabled: true,
     onSessionReady: useCallback((sessionId: string) => {
@@ -65,7 +59,6 @@ function MainLayoutContent({ agentId }: { agentId: string }) {
     }
   }, [session]);
 
-  // Also watch for active matchup session changes
   useEffect(() => {
     if (matchupContext.activeMatchupSessionId && matchupContext.activeMatchupSessionId !== currentSessionId) {
       setCurrentSessionId(matchupContext.activeMatchupSessionId);
@@ -73,11 +66,9 @@ function MainLayoutContent({ agentId }: { agentId: string }) {
     }
   }, [matchupContext.activeMatchupSessionId, currentSessionId]);
 
-  // Load existing session from storage on mount (only if no matchup session is active)
   useEffect(() => {
     if (currentSessionId || !agentId || hasCreatedSession.current) return;
     
-    // If there's an active matchup session, use that instead
     if (matchupContext.activeMatchupSessionId) {
       setCurrentSessionId(matchupContext.activeMatchupSessionId);
       hasCreatedSession.current = true;
@@ -96,9 +87,13 @@ function MainLayoutContent({ agentId }: { agentId: string }) {
           setRoomId(latestSession.channelId);
           hasCreatedSession.current = true;
         }
-        // If no sessions exist, auto-session creation will handle it
       } catch (error) {
         console.error('Error checking existing sessions:', error);
+        captureError(error instanceof Error ? error : new Error(String(error)), {
+          component: 'MainLayout',
+          action: 'loadExistingSession',
+          metadata: { agentId },
+        });
       }
     };
     
@@ -109,7 +104,6 @@ function MainLayoutContent({ agentId }: { agentId: string }) {
     setCurrentSessionId(sessionId);
     hasCreatedSession.current = true;
     
-    // Try to get roomId from stored session first
     const storage = await import('@/services/storage/conversationStorage');
     const stored = await storage.getSession(sessionId).catch(() => null);
     
@@ -118,36 +112,42 @@ function MainLayoutContent({ agentId }: { agentId: string }) {
       return;
     }
     
-    // If not in storage, fetch from API
     try {
       const { getSession } = await import('@/services/api/sessions');
       const session = await getSession(sessionId);
       setRoomId(session?.channelId || sessionId);
       if (session) await storage.saveSession(session);
-    } catch (error) {
-      // If session not found, mark it as invalid
-      const { SessionNotFoundError } = await import('@/services/api/client');
-      if (error instanceof SessionNotFoundError) {
-        console.warn(`[MainLayout] Session ${sessionId.slice(0, 8)}... not found on backend`);
-        handleSessionInvalid(sessionId);
-        return;
+      } catch (error) {
+        const { SessionNotFoundError } = await import('@/services/api/client');
+        if (error instanceof SessionNotFoundError) {
+          handleSessionInvalid(sessionId);
+          return;
+        }
+        console.error('Error fetching session:', error);
+        captureError(error instanceof Error ? error : new Error(String(error)), {
+          component: 'MainLayout',
+          action: 'handleSessionSelect',
+          metadata: { sessionId },
+        });
+        setRoomId(sessionId);
       }
-      console.error('Error fetching session from API:', error);
-      setRoomId(sessionId); // Fallback to sessionId
-    }
   };
 
   const handleSessionInvalid = async (invalidSessionId: string) => {
-    // Remove invalid session from storage
     const storage = await import('@/services/storage/conversationStorage');
-    await storage.deleteSession(invalidSessionId).catch(console.error);
+    await storage.deleteSession(invalidSessionId).catch((err) => {
+      console.error('[MainLayout] Failed to delete session:', err);
+      captureError(err instanceof Error ? err : new Error(String(err)), {
+        component: 'MainLayout',
+        action: 'handleSessionInvalid',
+        metadata: { sessionId: invalidSessionId },
+      });
+    });
     
-    // Remove from React Query cache
     queryClient.removeQueries({ queryKey: ['session', invalidSessionId] });
     queryClient.removeQueries({ queryKey: ['messages', invalidSessionId] });
     queryClient.invalidateQueries({ queryKey: ['sessions'] });
     
-    // If this was the current session, clear it
     if (currentSessionId === invalidSessionId) {
       setCurrentSessionId(null);
       setRoomId(null);
@@ -155,24 +155,20 @@ function MainLayoutContent({ agentId }: { agentId: string }) {
     }
   };
 
-  // Terminal resize handlers
   useEffect(() => {
+    if (!isResizing.current) return;
+
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing.current) return;
       const newHeight = window.innerHeight - e.clientY;
-      const minHeight = 100;
-      const maxHeight = window.innerHeight * 0.7;
-      setTerminalHeight(Math.max(minHeight, Math.min(maxHeight, newHeight)));
+      setTerminalHeight(Math.max(100, Math.min(window.innerHeight * 0.7, newHeight)));
     };
 
     const handleMouseUp = () => {
       isResizing.current = false;
     };
 
-    if (isResizing.current) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-    }
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
 
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
@@ -205,7 +201,6 @@ function MainLayoutContent({ agentId }: { agentId: string }) {
           />
           <main className="flex-1 flex flex-col overflow-hidden relative">
             <div className="flex-1 flex overflow-hidden">
-              {/* Main content area */}
               <div
                 className={cn('flex-1 flex flex-col overflow-hidden', showTerminal && 'pb-0')}
                 style={showTerminal ? { height: `calc(100% - ${terminalHeight}px)` } : undefined}
@@ -214,7 +209,7 @@ function MainLayoutContent({ agentId }: { agentId: string }) {
                   <ChatContainer
                     sessionId={currentSessionId}
                     agentId={agentId}
-                    roomId={roomId || currentSessionId} // Fallback to sessionId if roomId not available
+                    roomId={roomId || currentSessionId}
                     onSessionInvalid={handleSessionInvalid}
                     showMessageInput={true}
                   />
@@ -225,7 +220,6 @@ function MainLayoutContent({ agentId }: { agentId: string }) {
                 )}
               </div>
               
-              {/* Match Panel (upper-right) */}
               {showMatchPanel && (
                 <MatchPanel defaultExpanded={true} />
               )}
@@ -245,7 +239,6 @@ function MainLayoutContent({ agentId }: { agentId: string }) {
                     prompt="$ "
                     onCommand={(command) => {
                       console.log('Terminal command:', command);
-                      // You can integrate this with your agent or execute commands here
                     }}
                   />
                 </div>
@@ -253,10 +246,8 @@ function MainLayoutContent({ agentId }: { agentId: string }) {
             )}
           </main>
         </div>
-        
       </div>
       
-      {/* Mobile Match Panel (rendered outside main layout for full-screen overlay) */}
       {!showMatchPanel && <MatchPanel defaultExpanded={false} />}
     </div>
   );

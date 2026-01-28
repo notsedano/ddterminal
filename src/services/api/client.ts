@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { getApiBase, getAuthToken } from '@/utils/config';
+import { captureError } from '@/utils/errorTracking';
 
 const apiBase = getApiBase();
 const authToken = getAuthToken();
@@ -44,20 +45,52 @@ apiClient.interceptors.response.use(
       
       if (status === 401) {
         console.error('Unauthorized - authentication may be required');
+        captureError(new Error('Unauthorized'), {
+          component: 'apiClient',
+          action: 'httpRequest',
+          metadata: { status, url: requestUrl, errorCode },
+        });
       } else if (status === 403) {
         console.error('Forbidden - insufficient permissions');
+        captureError(new Error('Forbidden'), {
+          component: 'apiClient',
+          action: 'httpRequest',
+          metadata: { status, url: requestUrl, errorCode },
+        });
       } else if (status === 404) {
         console.error(`Not found (404) - ${requestUrl}`);
+        if (!isSessionsEndpoint) {
+          captureError(new Error('Not found'), {
+            component: 'apiClient',
+            action: 'httpRequest',
+            metadata: { status, url: requestUrl },
+          });
+        }
       } else if (status === 400 && isSessionsEndpoint) {
         // 400 errors on sessions endpoint might be SESSION_NOT_FOUND
         if (errorCode === 'SESSION_NOT_FOUND') {
           throw new SessionNotFoundError(errorMessage, errorCode);
         }
         console.error(`Bad request (400) - ${requestUrl}`);
+        captureError(new Error('Bad request'), {
+          component: 'apiClient',
+          action: 'httpRequest',
+          metadata: { status, url: requestUrl, errorCode },
+        });
       } else if (status === 429) {
         console.error('Rate limited - too many requests');
+        captureError(new Error('Rate limited'), {
+          component: 'apiClient',
+          action: 'httpRequest',
+          metadata: { status, url: requestUrl },
+        });
       } else if (status >= 500) {
         console.error(`Server error (${status}) - backend may be unavailable`);
+        captureError(new Error(`Server error ${status}`), {
+          component: 'apiClient',
+          action: 'httpRequest',
+          metadata: { status, url: requestUrl, errorMessage },
+        });
       }
       
       // Provide more helpful error messages based on the endpoint
@@ -74,10 +107,22 @@ apiClient.interceptors.response.use(
     }
     
     if (error.request) {
-      throw new Error('Network error - unable to reach backend server. Please check your connection and that the server is running.');
+      const networkError = new Error('Network error - unable to reach backend server. Please check your connection and that the server is running.');
+      captureError(networkError, {
+        component: 'apiClient',
+        action: 'httpRequest',
+        metadata: { errorType: 'network', message: error.message },
+      });
+      throw networkError;
     }
     
-    throw new Error(error.message || 'An unexpected error occurred');
+    const unexpectedError = new Error(error.message || 'An unexpected error occurred');
+    captureError(unexpectedError, {
+      component: 'apiClient',
+      action: 'httpRequest',
+      metadata: { errorType: 'unexpected', message: error.message },
+    });
+    throw unexpectedError;
   }
 );
 

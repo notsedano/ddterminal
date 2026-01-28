@@ -175,10 +175,16 @@ export function useMemory({
 
       // Try Supabase first if configured
       if (isSupabaseConfigured()) {
-        const supabaseContext = await getMemoryContext(supabaseUserId, options).catch(() => null);
+        const supabaseContext = await getMemoryContext(supabaseUserId, options).catch((err) => {
+          console.warn('[useMemory] Failed to load memory context from Supabase:', err);
+          return null;
+        });
         if (supabaseContext && supabaseContext.memoryCount > 0) {
           // Sync to local storage for offline support (non-blocking)
-          syncContextToLocal(supabaseContext).catch(() => {});
+          syncContextToLocal(supabaseContext).catch((err) => {
+            console.warn('[useMemory] Failed to sync memory context to local storage:', err);
+            // Non-critical - context is loaded, sync failure is recoverable
+          });
           return supabaseContext;
         }
       }
@@ -210,7 +216,10 @@ export function useMemory({
         const result = await createMemoryFragment(fullMemory);
         if (result) {
           // Sync to local (non-blocking)
-          saveLocalMemoryFragment(result).catch(() => {});
+          saveLocalMemoryFragment(result).catch((err) => {
+            console.warn('[useMemory] Failed to sync memory fragment to local storage:', err);
+            // Non-critical - fragment is saved in Supabase, sync failure is recoverable
+          });
           return result;
         }
       }
@@ -258,7 +267,10 @@ export function useMemory({
         const results = await createMemoryFragments(fullMemories);
         if (results.length > 0) {
           // Sync to local (non-blocking)
-          saveLocalMemoryFragments(results).catch(() => {});
+          saveLocalMemoryFragments(results).catch((err) => {
+            console.warn('[useMemory] Failed to sync memory fragments to local storage:', err);
+            // Non-critical - fragments are saved in Supabase, sync failure is recoverable
+          });
           return results;
         }
       }
@@ -341,7 +353,10 @@ export function useMemory({
         const result = await upsertConversationSummary(fullSummary);
         if (result) {
           // Sync to local (non-blocking)
-          saveLocalConversationSummary(result).catch(() => {});
+          saveLocalConversationSummary(result).catch((err) => {
+            console.warn('[useMemory] Failed to sync conversation summary to local storage:', err);
+            // Non-critical - summary is saved in Supabase, sync failure is recoverable
+          });
           return result;
         }
       }

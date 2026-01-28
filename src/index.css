@@ -657,6 +657,41 @@ body {
   display: none;
 }
 
+/* Gold Border Animation */
+@keyframes gold {
+  0% { background-position: 0 0; }
+  50% { background-position: 400% 0; }
+  100% { background-position: 0 0; }
+}
+
+.gold-border {
+  position: relative;
+}
+
+.gold-border::before,
+.gold-border::after {
+  content: '';
+  position: absolute;
+  left: -2px;
+  top: -2px;
+  border-radius: 12px;
+  background: linear-gradient(45deg, #FFD700, #FFA500, #FF8C00, #FFD700, #FFA500, #FF8C00, #FFD700, #FFA500, #FF8C00, #FFD700);
+  background-size: 400%;
+  width: calc(100% + 4px);
+  height: calc(100% + 4px);
+  z-index: -1;
+  animation: gold 20s linear infinite;
+}
+
+.gold-border::after {
+  filter: blur(50px);
+}
+
+/* Remove glow from gold border */
+.gold-border-no-glow::after {
+  display: none;
+}
+
 /* Shiny Button Styles */
 
 @property --gradient-angle {

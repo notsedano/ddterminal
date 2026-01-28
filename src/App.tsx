@@ -1,6 +1,7 @@
 import { QueryClient } from '@tanstack/react-query';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { MainLayout } from '@/components/layout/MainLayout';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { getTheme } from '@/utils/storage';
 import { getAgentId } from '@/utils/config';
 import { useEffect } from 'react';
@@ -44,12 +45,14 @@ function App() {
   const agentId = getAgentId() || 'test-dd-local';
 
   return (
-    <PersistQueryClientProvider
-      client={queryClient}
-      persistOptions={persistOptions}
-    >
-      <MainLayout agentId={agentId} />
-    </PersistQueryClientProvider>
+    <ErrorBoundary>
+      <PersistQueryClientProvider
+        client={queryClient}
+        persistOptions={persistOptions}
+      >
+        <MainLayout agentId={agentId} />
+      </PersistQueryClientProvider>
+    </ErrorBoundary>
   );
 }
 
