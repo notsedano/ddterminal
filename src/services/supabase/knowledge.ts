@@ -6,6 +6,10 @@
  */
 
 import { supabase } from './client';
+
+/** Supabase client cast for knowledge tables/RPCs not in generated types */
+const db = supabase as any;
+
 import {
   scrapeArticle,
   generateEmbeddings,
@@ -14,7 +18,7 @@ import {
   JinaRateLimitError,
   JinaScrapingError,
 } from '@/services/jina';
-import { chunkText, countWords, extractDomain } from '@/utils/chunking';
+import { chunkText, extractDomain } from '@/utils/chunking';
 import type {
   KnowledgeSource,
   KnowledgeSourceRow,
@@ -46,7 +50,7 @@ const CHUNK_OPTIONS = {
  * Retrieves all knowledge sources for a session.
  */
 export async function getSessionKnowledgeSources(sessionId: string): Promise<KnowledgeSource[]> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('session_knowledge_sources')
     .select('*')
     .eq('session_id', sessionId)
@@ -56,7 +60,7 @@ export async function getSessionKnowledgeSources(sessionId: string): Promise<Kno
     throw new Error(`Failed to get knowledge sources: ${error.message}`);
   }
 
-  return (data as KnowledgeSourceRow[]).map(row => ({
+  return (data as unknown as KnowledgeSourceRow[]).map(row => ({
     id: row.id,
     sessionId: row.session_id,
     userId: row.user_id,
@@ -79,7 +83,7 @@ export async function getSessionKnowledgeSources(sessionId: string): Promise<Kno
  * Gets the count of knowledge sources for a session.
  */
 export async function getSessionKnowledgeSourceCount(sessionId: string): Promise<number> {
-  const { count, error } = await supabase
+  const { count, error } = await db
     .from('session_knowledge_sources')
     .select('*', { count: 'exact', head: true })
     .eq('session_id', sessionId);
@@ -95,7 +99,7 @@ export async function getSessionKnowledgeSourceCount(sessionId: string): Promise
  * Checks if a URL already exists for a session.
  */
 export async function isUrlAlreadyAdded(sessionId: string, url: string): Promise<boolean> {
-  const { data } = await supabase
+  const { data } = await db
     .from('session_knowledge_sources')
     .select('id')
     .eq('session_id', sessionId)
@@ -127,7 +131,7 @@ export async function addKnowledgeSource(
   }
 
   // Create the source in pending status
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('session_knowledge_sources')
     .insert({
       session_id: sessionId,
@@ -146,7 +150,7 @@ export async function addKnowledgeSource(
     throw new Error(`Failed to add knowledge source: ${error.message}`);
   }
 
-  const row = data as KnowledgeSourceRow;
+  const row = data as unknown as KnowledgeSourceRow;
   
   return {
     id: row.id,
@@ -197,7 +201,7 @@ async function updateSourceStatus(
     updatePayload.processed_at = new Date().toISOString();
   }
 
-  const { error } = await supabase
+  const { error } = await db
     .from('session_knowledge_sources')
     .update(updatePayload)
     .eq('id', sourceId);
@@ -213,7 +217,7 @@ async function updateSourceStatus(
  */
 export async function processKnowledgeSource(sourceId: string): Promise<void> {
   // Get the source
-  const { data: sourceData, error: sourceError } = await supabase
+  const { data: sourceData, error: sourceError } = await db
     .from('session_knowledge_sources')
     .select('*')
     .eq('id', sourceId)
@@ -223,7 +227,7 @@ export async function processKnowledgeSource(sourceId: string): Promise<void> {
     throw new Error('Knowledge source not found');
   }
 
-  const source = sourceData as KnowledgeSourceRow;
+  const source = sourceData as unknown as KnowledgeSourceRow;
 
   // Update status to processing
   await updateSourceStatus(sourceId, 'processing');
@@ -276,7 +280,7 @@ export async function processKnowledgeSource(sourceId: string): Promise<void> {
     embedding: `[${embeddings[index].join(',')}]`,
   }));
 
-  const { error: chunksError } = await supabase
+  const { error: chunksError } = await db
     .from('session_knowledge_chunks')
     .insert(chunkInserts);
 
@@ -305,7 +309,7 @@ export async function processKnowledgeSource(sourceId: string): Promise<void> {
  * Deletes a knowledge source and all its chunks (cascading delete).
  */
 export async function deleteKnowledgeSource(sourceId: string): Promise<void> {
-  const { error } = await supabase
+  const { error } = await db
     .from('session_knowledge_sources')
     .delete()
     .eq('id', sourceId);
@@ -332,7 +336,7 @@ export async function searchSessionKnowledge(
   const queryEmbedding = await generateQueryEmbedding(query);
 
   // Call the search function
-  const { data, error } = await supabase.rpc('search_session_knowledge', {
+  const { data, error } = await db.rpc('search_session_knowledge', {
     p_session_id: sessionId,
     p_query_embedding: `[${queryEmbedding.join(',')}]`,
     p_limit: limit,
@@ -342,7 +346,7 @@ export async function searchSessionKnowledge(
     throw new Error(`Knowledge search failed: ${error.message}`);
   }
 
-  return (data as KnowledgeSearchResultRow[]).map(row => ({
+  return (data as unknown as KnowledgeSearchResultRow[]).map(row => ({
     chunkId: row.chunk_id,
     sourceId: row.source_id,
     content: row.content,
@@ -361,7 +365,7 @@ export async function searchSessionKnowledge(
 export async function getSessionKnowledgeContext(
   sessionId: string
 ): Promise<KnowledgeContextItem[]> {
-  const { data, error } = await supabase.rpc('get_session_knowledge_context', {
+  const { data, error } = await db.rpc('get_session_knowledge_context', {
     p_session_id: sessionId,
   });
 
@@ -369,7 +373,7 @@ export async function getSessionKnowledgeContext(
     throw new Error(`Failed to get knowledge context: ${error.message}`);
   }
 
-  return (data as KnowledgeContextRow[]).map(row => ({
+  return (data as unknown as KnowledgeContextRow[]).map(row => ({
     sourceTitle: row.source_title,
     sourceUrl: row.source_url,
     sourceDomain: row.source_domain,
@@ -382,7 +386,7 @@ export async function getSessionKnowledgeContext(
  * Checks if a session has any completed knowledge sources.
  */
 export async function sessionHasKnowledge(sessionId: string): Promise<boolean> {
-  const { count, error } = await supabase
+  const { count, error } = await db
     .from('session_knowledge_sources')
     .select('*', { count: 'exact', head: true })
     .eq('session_id', sessionId)

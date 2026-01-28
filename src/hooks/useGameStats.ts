@@ -156,7 +156,7 @@ function extractPlayerStatsFromBoxscore(
     if (!stats) continue;
     
     const playerName = player.full_name || `${player.first_name} ${player.last_name}`;
-    const injuredPlayer = findPlayerInjury(player.id, playerName, injuries);
+    const injuredPlayer = findPlayerInjury(player.id, playerName, injuries ?? null);
     const primaryInjury = injuredPlayer?.injuries?.[0];
     
     const playerStats: PlayerGameStats = {
@@ -182,7 +182,7 @@ function extractPlayerStatsFromBoxscore(
       threePointsMade: stats.three_points_made || 0,
       threePointsAttempted: stats.three_points_att || 0,
       isSeasonAverage: false,
-      injuryStatus: primaryInjury?.status,
+      injuryStatus: primaryInjury?.status as PlayerGameStats['injuryStatus'],
       isInjured: !!injuredPlayer,
     };
 
@@ -340,7 +340,7 @@ function extractPlayerStatsFromSeasonStats(
     const statsObj = stats as unknown as Record<string, unknown>;
 
     const playerName = player.full_name || `${player.first_name} ${player.last_name}`;
-    const injuredPlayer = findPlayerInjury(player.id, playerName, injuries);
+    const injuredPlayer = findPlayerInjury(player.id, playerName, injuries ?? null);
     const primaryInjury = injuredPlayer?.injuries?.[0];
 
     const playerStats: PlayerGameStats = {
@@ -367,7 +367,7 @@ function extractPlayerStatsFromSeasonStats(
       threePointsMade: extractThreeMade(statsObj),
       threePointsAttempted: extractThreeAtt(statsObj),
       isSeasonAverage: true,
-      injuryStatus: primaryInjury?.status,
+      injuryStatus: primaryInjury?.status as PlayerGameStats['injuryStatus'],
       isInjured: !!injuredPlayer,
     };
 

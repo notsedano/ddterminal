@@ -210,7 +210,7 @@ export function createSSEStream(
       });
 
       // Handle connection errors (network issues, server closed, etc.)
-      eventSource.onerror = (error) => {
+      eventSource.onerror = (_err) => {
         const readyState = eventSource?.readyState;
         
         // EventSource.CONNECTING = 0, EventSource.OPEN = 1, EventSource.CLOSED = 2
@@ -302,16 +302,16 @@ if (typeof window !== 'undefined') {
   (window as any).__activeSSEConnections = new Set<EventSource>();
   
   (window as any).checkSSEStatus = () => {
-    const networkRequests = performance.getEntriesByType('resource')
-      .filter((r: PerformanceResourceTiming) => r.name.includes('/stream'));
-    
+    const resources = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
+    const networkRequests = resources.filter((r) => r.name.includes('/stream'));
+
     console.log('=== SSE Connection Status ===');
     console.log('Network requests to /stream:', networkRequests.length);
-    
-    const active = networkRequests.filter((r: PerformanceResourceTiming) => r.duration === 0);
+
+    const active = networkRequests.filter((r) => r.duration === 0);
     if (active.length > 0) {
       console.log('✅ SSE connection is ACTIVE');
-      active.forEach((r: PerformanceResourceTiming) => {
+      active.forEach((r) => {
         console.log('  - Active connection:', r.name);
       });
     } else {

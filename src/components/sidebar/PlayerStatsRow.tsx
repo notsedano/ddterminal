@@ -141,13 +141,14 @@ export const PlayerStatsRow = memo(function PlayerStatsRow({
         </span>
         {/* Injury Indicator */}
         {player.isInjured && player.injuryStatus && (
-          <AlertTriangle 
-            className={cn(
-              'h-3 w-3 flex-shrink-0',
-              getInjuryColor()
-            )}
-            title={`Injury Status: ${player.injuryStatus}`}
-          />
+          <span title={`Injury Status: ${player.injuryStatus}`}>
+            <AlertTriangle
+              className={cn(
+                'h-3 w-3 flex-shrink-0',
+                getInjuryColor()
+              )}
+            />
+          </span>
         )}
       </div>
 

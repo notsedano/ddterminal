@@ -96,7 +96,8 @@ export class JinaScrapingError extends Error {
  * Retrieves the current Jina API rate limit status from Supabase.
  */
 export async function getRateLimitStatus(): Promise<JinaRateLimitStatus> {
-  const { data, error } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any)
     .from('jina_rate_limit_status')
     .select('*')
     .eq('id', 1)
@@ -117,7 +118,7 @@ export async function getRateLimitStatus(): Promise<JinaRateLimitStatus> {
     throw new Error(`Failed to get Jina rate limit status: ${error.message}`);
   }
 
-  const row = data as JinaRateLimitStatusRow;
+  const row = data as unknown as JinaRateLimitStatusRow;
   
   // Check if reset time has passed and re-enable if so
   const now = new Date();
@@ -186,7 +187,8 @@ async function updateRateLimitStatus(
     updatePayload.is_disabled = updates.isDisabled;
   }
 
-  const { error } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase as any)
     .from('jina_rate_limit_status')
     .update(updatePayload)
     .eq('id', 1);

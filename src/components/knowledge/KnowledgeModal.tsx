@@ -377,7 +377,7 @@ export function KnowledgeModal({ isOpen, onClose, sessionId, userId }: Knowledge
               />
               <Button
                 onClick={handleAddUrl}
-                disabled={isAdding || !url.trim()}
+                disabled={isAdding || !url.trim() || !canAddMore}
                 className="flex-shrink-0"
               >
                 {isAdding ? (

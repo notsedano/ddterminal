@@ -30,7 +30,7 @@ import { useMemory, useMemoryExtraction } from './useMemory';
 import { getUserId } from '@/utils/storage';
 import { convertApiMessageToMessage, mergeMessages } from '@/utils/messageUtils';
 import { createSSEStream, type SSEChunkEvent, type SSEMessageEvent } from '@/utils/sse';
-import type { Message, SocketMessageEvent } from '@/types';
+import type { Message } from '@/types';
 import type { KnowledgeSearchResult } from '@/types/knowledge';
 
 export interface UseChatOptions {
@@ -138,7 +138,7 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
 
   // Socket.IO connection - optional for bidirectional features (non-blocking)
   // SSE is used for streaming instead
-  const socket = useSocket({
+  useSocket({
     agentId,
     roomId,
     enabled: false, // Disabled - using SSE for streaming instead
@@ -257,9 +257,7 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
     }
 
     console.log('[useChat] Setting up SSE stream for streaming responses', { agentId, roomId, sessionId });
-    
-    const { isAuthenticated: currentAuth, supabaseUserId: currentSbId } = authStateRef.current;
-    
+
     const cleanup = createSSEStream(agentId, roomId, {
       onChunk: (data: SSEChunkEvent) => {
         // Handle streaming chunks

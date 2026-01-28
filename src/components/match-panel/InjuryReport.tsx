@@ -6,7 +6,7 @@
 import { memo } from 'react';
 import { cn } from '@/utils/cn';
 import type { NBATeamInjuries, NBAInjuredPlayer } from '@/types';
-import { AlertTriangle, CheckCircle2, User, ChevronDown, ChevronUp } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState } from 'react';
 
 interface InjuryReportProps {
@@ -289,59 +289,3 @@ const TeamInjuriesCompact = memo(function TeamInjuriesCompact({ team }: TeamInju
   );
 });
 
-/**
- * Player Injury Display
- */
-interface PlayerInjuryProps {
-  player: NBAInjuredPlayer;
-  severity: 'critical' | 'questionable' | 'probable';
-}
-
-const PlayerInjury = memo(function PlayerInjury({ player, severity }: PlayerInjuryProps) {
-  const primaryInjury = player.injuries[0];
-  const statusColor = {
-    critical: 'text-red-400',
-    questionable: 'text-yellow-400',
-    probable: 'text-green-400',
-  }[severity];
-
-  const statusBg = {
-    critical: 'bg-red-500/10',
-    questionable: 'bg-yellow-500/10',
-    probable: 'bg-green-500/10',
-  }[severity];
-
-  return (
-    <div className={cn('flex items-start gap-2 p-1.5 rounded', statusBg)}>
-      <User className="h-3 w-3 mt-0.5 text-muted-foreground shrink-0" />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-medium truncate">
-            {player.full_name}
-            {player.jersey_number && (
-              <span className="text-muted-foreground ml-1">#{player.jersey_number}</span>
-            )}
-            {player.position && (
-              <span className="text-muted-foreground ml-1">({player.position})</span>
-            )}
-          </span>
-          {primaryInjury && (
-            <span className={cn('text-[9px] font-semibold px-1.5 py-0.5 rounded', statusColor, statusBg)}>
-              {primaryInjury.status}
-            </span>
-          )}
-        </div>
-        {primaryInjury?.desc && (
-          <p className="text-[9px] text-muted-foreground mt-0.5 line-clamp-2">
-            {primaryInjury.desc}
-          </p>
-        )}
-        {primaryInjury?.comment && (
-          <p className="text-[9px] text-muted-foreground/70 mt-0.5 italic line-clamp-1">
-            {primaryInjury.comment}
-          </p>
-        )}
-      </div>
-    </div>
-  );
-});
