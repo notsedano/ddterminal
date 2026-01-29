@@ -27,7 +27,7 @@ import { getSession as getLocalSession } from '@/services/storage/conversationSt
 import { useAuth } from './useAuth';
 import { useMemory, useMemoryExtraction } from './useMemory';
 import { getUserId } from '@/utils/storage';
-import { convertApiMessageToMessage, mergeMessages, isMessageRelated, sanitizeMetadata } from '@/utils/messageUtils';
+import { convertApiMessageToMessage, mergeMessages, sanitizeMetadata } from '@/utils/messageUtils';
 import { captureError } from '@/utils/errorTracking';
 import type { Message, SendMessageResponse } from '@/types';
 import type { KnowledgeSearchResult } from '@/types/knowledge';
@@ -65,7 +65,7 @@ function safeExtractErrorMessage(error: unknown): string {
     // Last resort: use safe stringify with circular reference handling
     try {
       const seen = new WeakSet();
-      return JSON.stringify(error, (key, value) => {
+      return JSON.stringify(error, (_key, value) => {
         if (typeof value === 'object' && value !== null) {
           if (seen.has(value)) {
             return '[Circular]';
@@ -91,6 +91,7 @@ export interface UseChatOptions {
   onSessionInvalid?: (sessionId: string) => void;
   enableMemory?: boolean;
   enableKnowledge?: boolean;
+  onThought?: (thought: SSEThoughtEvent) => void;
 }
 
 async function ensureSessionInSupabase(
@@ -222,7 +223,7 @@ async function saveMessage(
   }
 }
 
-export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMemory = true, enableKnowledge = true, onThought }: UseChatOptions) {
+export function useChat({ sessionId, agentId, roomId: _roomId, onSessionInvalid, enableMemory = true, enableKnowledge = true, onThought }: UseChatOptions) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingMessage, setStreamingMessage] = useState<string>('');
   const [thoughtProcess, setThoughtProcess] = useState<string>('');
@@ -274,7 +275,7 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
   const recentlySentMessageIdsRef = useRef<Set<string>>(new Set());
 
   const sendMessageMutation = useMutation({
-    mutationFn: async ({ text, displayText, metadata, skipAddingUserMessage = false }: { text: string; displayText?: string; metadata?: { action?: 'predict'; context?: Record<string, unknown> }; skipAddingUserMessage?: boolean }) => {
+    mutationFn: async ({ text, displayText: _displayText, metadata, skipAddingUserMessage = false }: { text: string; displayText?: string; metadata?: { action?: 'predict'; context?: Record<string, unknown> }; skipAddingUserMessage?: boolean }) => {
       if (!sessionId) throw new Error('No session available');
 
       // Search for relevant knowledge context if session has knowledge

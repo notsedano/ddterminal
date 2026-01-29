@@ -92,6 +92,7 @@ export function usePrediction(): UsePredictionReturn {
       }],
       isStreaming: true,
       progress: 5,
+      currentPhase: null,
     });
 
     UI_ANIMATION_THOUGHTS.forEach((thoughtData, index) => {

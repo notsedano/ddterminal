@@ -65,7 +65,7 @@ function safeStringify(obj: unknown): string {
   const seenRefs = new WeakMap<object, string>();
   let refCounter = 0;
   
-  return JSON.stringify(obj, (key, value) => {
+  return JSON.stringify(obj, (_key, value) => {
     if (typeof value === 'object' && value !== null) {
       if (seen.has(value)) {
         // Return a reference indicator instead of the circular reference
@@ -120,7 +120,7 @@ function safeExtractErrorMessage(error: unknown): string {
     // Last resort: use safe stringify with circular reference handling
     try {
       const seen = new WeakSet();
-      return JSON.stringify(error, (key, value) => {
+      return JSON.stringify(error, (_key, value) => {
         if (typeof value === 'object' && value !== null) {
           if (seen.has(value)) {
             return '[Circular]';
@@ -397,9 +397,10 @@ export async function sendMessageWithStreaming(
       }
       handlers.onError?.(networkError);
     } else {
+      const code = error instanceof Error ? 'FETCH_ERROR' as const : 'UNKNOWN_ERROR' as const;
       const genericError = { 
         message: errorMessage,
-        code: (error instanceof Error ? 'FETCH_ERROR' : 'UNKNOWN_ERROR') as const
+        code
       };
       try {
         console.error('[sendMessageWithStreaming] Error:', {
@@ -671,9 +672,10 @@ export async function sendMessage(
       }
       handlers.onError?.(networkError);
     } else {
+      const code = error instanceof Error ? 'FETCH_ERROR' as const : 'UNKNOWN_ERROR' as const;
       const genericError = { 
         message: errorMessage,
-        code: (error instanceof Error ? 'FETCH_ERROR' : 'UNKNOWN_ERROR') as const
+        code
       };
       try {
         console.error('[sendMessage] Error:', {

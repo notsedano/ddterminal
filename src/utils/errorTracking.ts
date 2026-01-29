@@ -98,7 +98,7 @@ function safeSerializeContext(context?: ErrorContext): Record<string, unknown> {
   if (context.metadata) {
     try {
       const seen = new WeakSet();
-      const sanitized = JSON.stringify(context.metadata, (key, value) => {
+      const sanitized = JSON.stringify(context.metadata, (_key, value) => {
         if (typeof value === 'object' && value !== null) {
           if (seen.has(value)) {
             return '[Circular]';

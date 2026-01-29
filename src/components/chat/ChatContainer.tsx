@@ -7,7 +7,7 @@ import { usePredictionData, buildSportsDataMessage, buildMarketDataMessage, buil
 import { SessionNotFoundError } from '@/services/api/client';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { cn } from '@/utils/cn';
-import { sanitizeMetadata } from '@/utils/messageUtils';
+import { sanitizeMetadata, extractErrorMessage } from '@/utils/messageUtils';
 
 export interface ChatContainerProps {
   sessionId: string | null;
