@@ -2,16 +2,31 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import { getApiBase, getAuthToken } from '@/utils/config';
 import { captureError } from '@/utils/errorTracking';
 
-const apiBase = getApiBase();
-const authToken = getAuthToken();
-
+// Create axios instance with default config
+// Note: We use a request interceptor to set baseURL dynamically
+// This ensures the production detection works correctly at runtime
 const apiClient: AxiosInstance = axios.create({
-  baseURL: apiBase ? `${apiBase}/api` : '/api',
   headers: {
     'Content-Type': 'application/json',
-    ...(authToken && { Authorization: `Bearer ${authToken}` }),
   },
   timeout: 30000,
+});
+
+// Request interceptor to dynamically set baseURL and auth token
+// This runs on every request, ensuring production detection works correctly
+apiClient.interceptors.request.use((config) => {
+  const apiBase = getApiBase();
+  const authToken = getAuthToken();
+  
+  // Set baseURL dynamically on each request
+  config.baseURL = apiBase ? `${apiBase}/api` : '/api';
+  
+  // Set auth token if available
+  if (authToken) {
+    config.headers.Authorization = `Bearer ${authToken}`;
+  }
+  
+  return config;
 });
 
 // Custom error class to preserve error code information
