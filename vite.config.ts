@@ -60,6 +60,20 @@ export default defineConfig(({ mode }) => {
             })
           },
         },
+        // Proxy Eliza backend API for local development (avoids CORS issues)
+        '/api/messaging': {
+          target: env.VITE_API_BASE || 'https://3a6615a6-aeris-agent.containers.elizacloud.ai',
+          changeOrigin: true,
+          // Keep the path as-is: /api/messaging/... -> /api/messaging/...
+          configure: (proxy) => {
+            proxy.on('proxyReq', (proxyReq, req) => {
+              // Forward SSE accept header if present
+              if (req.headers.accept?.includes('text/event-stream')) {
+                proxyReq.setHeader('Accept', 'text/event-stream')
+              }
+            })
+          },
+        },
       },
     },
     test: {

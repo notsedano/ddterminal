@@ -17,4 +17,4 @@ export * from './usePolymarketNBA';
 export * from './usePrediction';
 export * from './usePredictionData';
 export * from './useSession';
-export * from './useSocket';
+// useSocket removed - SSE is now used for streaming (see useChat.ts)

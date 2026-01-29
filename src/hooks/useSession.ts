@@ -116,7 +116,29 @@ export function useSession(sessionId: string | null) {
 
       // Check local storage
       const stored = await getStoredSession(sessionId);
-      if (stored) return stored;
+      if (stored) {
+        // Verify stored session is still valid by checking backend
+        try {
+          const backendSession = await getSession(sessionId);
+          // Backend session exists, use it and update local storage
+          await saveLocalSession(backendSession);
+          if (isAuthenticated && supabaseUserId && isSupabaseConfigured()) {
+            await saveSessionToSupabase(backendSession, supabaseUserId);
+          }
+          return backendSession;
+        } catch (error) {
+          // If session not found on backend, delete from local storage
+          if (error instanceof SessionNotFoundError) {
+            console.warn(`[useSession] Session ${sessionId.slice(0, 8)}... not found on backend, removing from local storage`);
+            await deleteStoredSession(sessionId).catch(() => {
+              // Ignore deletion errors
+            });
+            return null;
+          }
+          // For other errors, use stored session as fallback
+          return stored;
+        }
+      }
 
       // Fetch from backend and save
       try {
@@ -140,6 +162,13 @@ export function useSession(sessionId: string | null) {
     },
     enabled: !!sessionId,
     staleTime: 5 * 60 * 1000,
+    retry: (failureCount, error) => {
+      // Don't retry if session not found
+      if (error instanceof SessionNotFoundError) {
+        return false;
+      }
+      return failureCount < 2;
+    },
   });
 }
 
@@ -153,17 +182,9 @@ export function useSessions() {
   return useQuery<Session[]>({
     queryKey: ['sessions', isAuthenticated ? supabaseUserId : legacyUserId],
     queryFn: async () => {
-      console.log('[useSessions] Fetching sessions...', {
-        isAuthenticated,
-        supabaseUserId,
-        legacyUserId,
-        isSupabaseConfigured: isSupabaseConfigured(),
-      });
-
       // If authenticated with Supabase, fetch from Supabase
       if (isAuthenticated && supabaseUserId && isSupabaseConfigured()) {
         const supabaseSessions = await getAllSessionsFromSupabase(supabaseUserId);
-        console.log('[useSessions] Fetched from Supabase:', supabaseSessions.length, 'sessions');
         
         // Also update local cache (sync Supabase -> local)
         for (const session of supabaseSessions) {
@@ -182,10 +203,9 @@ export function useSessions() {
 
       // Otherwise, use local storage
       const localSessions = await getLocalSessions(legacyUserId);
-      console.log('[useSessions] Fetched from IndexedDB:', localSessions.length, 'sessions');
       return localSessions;
     },
-    staleTime: 0, // Always refetch to ensure consistency after deletions
+    staleTime: 10000, // Consider data fresh for 10 seconds to avoid excessive refetching
     refetchOnMount: true,
     refetchOnWindowFocus: false,
   });
@@ -216,7 +236,19 @@ export function useSessionMessages(sessionId: string | null) {
       return getMessages(sessionId);
     },
     enabled: !!sessionId,
-    refetchInterval: 30000,
+    staleTime: 30000, // Consider data fresh for 30 seconds
+    retry: (failureCount, error) => {
+      // Don't retry if session not found (404)
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (
+        error instanceof SessionNotFoundError ||
+        errorMessage.includes('404') ||
+        errorMessage.includes('not found')
+      ) {
+        return false;
+      }
+      return failureCount < 3;
+    },
   });
 }
 

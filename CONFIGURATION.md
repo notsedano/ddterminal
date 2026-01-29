@@ -26,9 +26,9 @@ http://localhost:3000
 
 ### 2. Agent ID
 
-**test-dd-local Agent ID:**
+**test-dd Agent ID:**
 ```
-a75cb8be-20f9-0b8c-b2f8-490b728253cd
+71196e85-8a16-0910-98e5-e2d2ee3018db
 ```
 
 ## Configuration Options
@@ -41,8 +41,8 @@ Create a `.env` file in the project root:
 # Backend API Base URL
 VITE_API_BASE=https://3a6615a6-aeris-agent.containers.elizacloud.ai
 
-# Agent ID to chat with
-VITE_AGENT_ID=a75cb8be-20f9-0b8c-b2f8-490b728253cd
+# Agent ID to chat with (test-dd)
+VITE_AGENT_ID=71196e85-8a16-0910-98e5-e2d2ee3018db
 
 # WebSocket URL (optional, defaults to API base URL)
 VITE_WS_URL=https://3a6615a6-aeris-agent.containers.elizacloud.ai
@@ -61,7 +61,7 @@ Add configuration directly in `index.html` before the app script:
 <script>
   window.ELIZA_CONFIG = {
     apiBase: 'https://3a6615a6-aeris-agent.containers.elizacloud.ai',
-    agentId: 'a75cb8be-20f9-0b8c-b2f8-490b728253cd',
+    agentId: '71196e85-8a16-0910-98e5-e2d2ee3018db',
   };
   
   // Optional: Auth token (alternative to window.ELIZA_AUTH_TOKEN)
@@ -110,7 +110,7 @@ To find the correct agent ID for your backend:
 curl https://3a6615a6-aeris-agent.containers.elizacloud.ai/api/agents
 ```
 
-Look for the agent with `name: "test-dd-local"` and use its `id` field.
+Look for the agent with `name: "test-dd"` and use its `id` field.
 
 ## Authentication
 

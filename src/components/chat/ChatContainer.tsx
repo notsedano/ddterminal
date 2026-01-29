@@ -1,9 +1,12 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { MessageList } from './MessageList';
 import { MessageInput } from './MessageInput';
 import { useChat } from '@/hooks/useChat';
 import { usePrediction } from '@/hooks/usePrediction';
 import { usePredictionData, buildComprehensivePredictionMessage } from '@/hooks/usePredictionData';
+import { sendMessageWithStreaming } from '@/services/api/messages';
+import { getUserId } from '@/utils/storage';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { cn } from '@/utils/cn';
 
 export interface ChatContainerProps {
@@ -23,7 +26,7 @@ export function ChatContainer({
   onSessionInvalid, 
   showMessageInput = true,
 }: ChatContainerProps) {
-  const { messages, sendMessage, isSending, isConnected, isTyping, error } = useChat({
+  const { messages, sendMessage, isSending, error } = useChat({
     sessionId,
     agentId,
     roomId,
@@ -38,12 +41,23 @@ export function ChatContainer({
     isStreaming: isPredicting,
     progress: predictionProgress,
     startThoughts,
+    addRealThought,
     reset: resetPrediction,
   } = usePrediction();
 
+  const userId = getUserId();
+
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+
   const handlePredictClick = useCallback(() => {
     if (isPredicting || isSending) return;
+    setShowConfirmDialog(true);
+  }, [isPredicting, isSending]);
+
+  const handleConfirmPrediction = useCallback(async () => {
+    if (isPredicting || isSending || !sessionId) return;
     
+    setShowConfirmDialog(false);
     resetPrediction();
     
     // Build comprehensive prediction message with all available data:
@@ -58,9 +72,45 @@ export function ChatContainer({
     // - Standings context (conference rank, point differential)
     const predictionMessage = buildComprehensivePredictionMessage(predictionData);
     
+    // Start UI animation immediately for visual feedback
     startThoughts();
-    sendMessage(predictionMessage);
-  }, [isPredicting, isSending, predictionData, resetPrediction, startThoughts, sendMessage]);
+    
+    // Send prediction message via SSE streaming to get real thought events
+    try {
+      await sendMessageWithStreaming(
+        sessionId,
+        { text: predictionMessage, userId },
+        {
+          onThought: (thoughtEvent) => {
+            // Add real thought from backend to prediction display
+            addRealThought(thoughtEvent);
+          },
+          onChunk: (chunkEvent) => {
+            // Handle streaming response chunks if needed
+            // For now, we'll let the regular message handling take care of this
+          },
+          onMessage: (messageEvent) => {
+            // Final message received - prediction complete
+            resetPrediction();
+          },
+          onError: (error) => {
+            console.error('[ChatContainer] Prediction SSE error:', error);
+            resetPrediction();
+          },
+          onDone: () => {
+            resetPrediction();
+          },
+        }
+      );
+    } catch (error) {
+      console.error('[ChatContainer] Failed to send prediction:', error);
+      resetPrediction();
+    }
+  }, [isPredicting, isSending, sessionId, predictionData, resetPrediction, startThoughts, addRealThought, userId]);
+
+  const handleCloseDialog = useCallback(() => {
+    setShowConfirmDialog(false);
+  }, []);
 
 
   return (
@@ -68,7 +118,6 @@ export function ChatContainer({
       <div className="flex-1 overflow-hidden">
         <MessageList 
           messages={messages} 
-          isTyping={isTyping}
           onPredictClick={handlePredictClick}
           isPredicting={isPredicting}
           predictionThoughts={predictionThoughts}
@@ -87,11 +136,16 @@ export function ChatContainer({
           {error}
         </div>
       )}
-      {!isConnected && !error && (
-        <div className="px-4 py-2 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 text-sm text-center">
-          Real-time updates unavailable. Messages sent via REST API.
-        </div>
-      )}
+      <ConfirmDialog
+        isOpen={showConfirmDialog}
+        onClose={handleCloseDialog}
+        onConfirm={handleConfirmPrediction}
+        title="Disclaimer"
+        message="Agent Daredevil's predictions are for educational purposes only. He is not liable for any losses. ever."
+        confirmText="I agree"
+        cancelText="Cancel"
+        variant="warning"
+      />
     </div>
   );
 }

@@ -8,17 +8,17 @@
   </head>
   <body>
     <div id="root"></div>
-    <!-- Optional: Runtime configuration (overrides .env variables) -->
-    <!--
+    <!-- Runtime configuration (overrides .env variables) -->
     <script>
       window.ELIZA_CONFIG = {
-        apiBase: 'https://3a6615a6-aeris-agent.containers.elizacloud.ai',
-        agentId: 'a75cb8be-20f9-0b8c-b2f8-490b728253cd',
+        // Use local proxy to avoid CORS issues with SSE streaming
+        // In production, set this to the actual backend URL
+        apiBase: '', // Empty string = use relative URLs (goes through Vite proxy)
+        agentId: '71196e85-8a16-0910-98e5-e2d2ee3018db',
       };
       // Optional: Auth token
       // window.ELIZA_AUTH_TOKEN = 'your-token-here';
     </script>
-    -->
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

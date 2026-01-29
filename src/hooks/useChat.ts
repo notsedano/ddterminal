@@ -18,12 +18,11 @@ import {
   formatSearchResultsForContext,
 } from '@/services/supabase';
 import { getSession as getLocalSession } from '@/services/storage/conversationStorage';
-import { useSocket } from './useSocket';
+// SSE streaming is now handled via POST /api/messaging/sessions/:sessionId/messages with transport: 'sse'
 import { useAuth } from './useAuth';
 import { useMemory, useMemoryExtraction } from './useMemory';
 import { getUserId } from '@/utils/storage';
 import { convertApiMessageToMessage, mergeMessages, isMessageRelated } from '@/utils/messageUtils';
-import { createSSEStream, type SSEChunkEvent, type SSEMessageEvent } from '@/utils/sse';
 import { captureError } from '@/utils/errorTracking';
 import type { Message } from '@/types';
 import type { KnowledgeSearchResult } from '@/types/knowledge';
@@ -110,10 +109,8 @@ async function saveMessage(
 
 export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMemory = true, enableKnowledge = true }: UseChatOptions) {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [streamingMessage, setStreamingMessage] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [knowledgeContext, setKnowledgeContext] = useState<KnowledgeSearchResult[]>([]);
-  const [sseConnected, setSseConnected] = useState(false);
   const isNewSessionRef = useRef(true);
   const userId = getUserId();
   const { isAuthenticated, supabaseUserId, isLoading: isAuthLoading } = useAuth();
@@ -149,15 +146,13 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
     staleTime: 30_000,
   });
 
-  useSocket({
-    agentId,
-    roomId,
-    enabled: false,
-  });
-
+  // Regular chat uses REST API (no streaming)
   const sendMessageMutation = useMutation({
-    mutationFn: async (text: string) => {
+    mutationFn: async ({ text, displayText }: { text: string; displayText?: string }) => {
       if (!sessionId) throw new Error('No session available');
+
+      // Use displayText for UI, but send actual text to backend
+      const messageToDisplay = displayText || text;
 
       // Search for relevant knowledge context if session has knowledge
       if (enableKnowledge && hasKnowledge) {
@@ -176,14 +171,11 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
           });
       }
 
-      const response = await sendMessageAPI(sessionId, {
-        text,
-        userId,
-      });
-
+      // Add user message immediately with display text
+      const tempUserMessageId = `user-${Date.now()}`;
       const userMessage: Message = {
-        id: response.messageId,
-        text,
+        id: tempUserMessageId,
+        text: messageToDisplay,
         userId,
         sessionId,
         createdAt: new Date().toISOString(),
@@ -191,14 +183,101 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
       };
 
       lastUserMessageRef.current = {
-        text,
+        text: messageToDisplay,
         timestamp: Date.now(),
       };
       lastAgentMessageTimeRef.current = 0;
       hasReceivedAgentResponseRef.current = false;
 
-      await saveMessage(userMessage, supabaseUserId, isAuthenticated);
       setMessages((prev) => [...prev, userMessage]);
+
+      // Try SSE streaming first (backend requires transport: 'sse' to generate responses)
+      // Fall back to REST API if SSE fails
+      let response: SendMessageResponse;
+      let useSSE = true;
+      
+      try {
+        const { sendMessageWithStreaming } = await import('@/services/api/messages');
+        console.log('[useChat] Attempting SSE streaming for message...');
+        
+        response = await sendMessageWithStreaming(
+          sessionId,
+          { text, userId },
+          {
+            onChunk: (chunkEvent) => {
+              console.log('[useChat] SSE chunk received:', chunkEvent.chunk.substring(0, 50));
+              // Handle streaming chunks - add to messages as they arrive
+              if (chunkEvent.messageId) {
+                setMessages((prev) => {
+                  const existingIndex = prev.findIndex(m => m.id === chunkEvent.messageId);
+                  if (existingIndex >= 0) {
+                    // Update existing message with new chunk
+                    const updated = [...prev];
+                    updated[existingIndex] = {
+                      ...updated[existingIndex],
+                      text: (updated[existingIndex].text || '') + chunkEvent.chunk,
+                    };
+                    return updated;
+                  } else {
+                    // Create new streaming message
+                    return [...prev, {
+                      id: chunkEvent.messageId || `streaming-${Date.now()}`,
+                      text: chunkEvent.chunk,
+                      userId: agentId,
+                      sessionId,
+                      createdAt: new Date().toISOString(),
+                      role: 'assistant',
+                    }];
+                  }
+                });
+              }
+            },
+            onMessage: (messageEvent) => {
+              console.log('[useChat] SSE message received:', messageEvent.text.substring(0, 50));
+              // Final complete message
+              const agentMessage: Message = {
+                id: messageEvent.messageId,
+                text: messageEvent.text,
+                userId: messageEvent.agentId,
+                sessionId: messageEvent.sessionId || sessionId,
+                createdAt: messageEvent.timestamp || new Date().toISOString(),
+                role: 'assistant',
+              };
+              setMessages((prev) => mergeMessages(prev, [agentMessage]));
+              saveMessage(agentMessage, supabaseUserId, isAuthenticated).catch(console.error);
+              hasReceivedAgentResponseRef.current = true;
+            },
+            onError: (error) => {
+              console.error('[useChat] SSE error:', error);
+              // Fall back to REST API
+              useSSE = false;
+            },
+            onDone: () => {
+              console.log('[useChat] SSE stream completed');
+              hasReceivedAgentResponseRef.current = true;
+            },
+          }
+        );
+        console.log('[useChat] SSE streaming successful');
+      } catch (sseError) {
+        console.warn('[useChat] SSE streaming failed, falling back to REST API:', sseError);
+        useSSE = false;
+        // Fall back to REST API
+        response = await sendMessageAPI(sessionId, { text, userId });
+      }
+      
+      // Store whether we used SSE for the onSuccess handler
+      lastMessageUsedSSERef.current = useSSE;
+
+      // Update user message with actual ID from response
+      if (response.messageId !== tempUserMessageId) {
+        setMessages((prev) => 
+          prev.map(m => m.id === tempUserMessageId ? { ...m, id: response.messageId } : m)
+        );
+      }
+
+      // Save message with display text for UI consistency
+      await saveMessage({ ...userMessage, id: response.messageId }, supabaseUserId, isAuthenticated);
 
       if (enableMemory && isAuthenticated && supabaseUserId) {
         trackInteraction(1, isNewSessionRef.current).catch((err) => {
@@ -224,6 +303,9 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
         });
       }
 
+      // Fetch agent response after sending message
+      // The backend will process the message and we'll get it via polling
+      console.log('[useChat] Message sent successfully, starting polling for agent response');
       return response;
     },
     onError: (error) => {
@@ -253,21 +335,69 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
     },
     onSuccess: async () => {
       if (!sessionId) return;
+      
+      // Check if we used SSE streaming
+      if (lastMessageUsedSSERef.current) {
+        console.log('[useChat] SSE streaming used, skipping polling');
+        lastMessageUsedSSERef.current = false; // Reset for next message
+        return; // SSE handles responses in real-time via callbacks
+      }
+
+      console.log('[useChat] Using REST API, starting polling for agent response');
+      let shouldStopPolling = false;
 
       const pollForMessages = async () => {
+        if (shouldStopPolling) {
+          console.log('[useChat] Polling stopped');
+          return;
+        }
+        
         try {
+          console.log('[useChat] Polling for messages...');
           const messagesResponse = await getMessagesAPI(sessionId);
-          if (!messagesResponse.messages?.length) return;
+          console.log('[useChat] Poll response:', {
+            messageCount: messagesResponse.messages?.length || 0,
+            messages: messagesResponse.messages?.map((m: any) => ({
+              id: m.id,
+              role: m.author_id === agentId ? 'agent' : 'user',
+              content: m.content?.substring(0, 50) + '...',
+            })),
+          });
+          
+          if (!messagesResponse.messages?.length) {
+            console.log('[useChat] No new messages in poll response');
+            return;
+          }
 
           const apiMessages = messagesResponse.messages.map((msg: any) =>
             convertApiMessageToMessage(msg, sessionId, agentId)
           );
 
+          console.log('[useChat] Adding messages to UI:', apiMessages.length);
           setMessages((prev) => mergeMessages(prev, apiMessages));
           await Promise.all(
             apiMessages.map((m) => saveMessage(m, supabaseUserId, isAuthenticated))
           );
+          
+          // Check if we got an agent response
+          const agentMessages = apiMessages.filter(m => m.role === 'assistant');
+          if (agentMessages.length > 0) {
+            console.log('[useChat] Agent response received!', agentMessages.length, 'message(s)');
+            hasReceivedAgentResponseRef.current = true;
+            shouldStopPolling = true; // Stop polling once we get a response
+          }
         } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          // Stop polling if session is not found
+          if (
+            error instanceof SessionNotFoundError ||
+            errorMessage.includes('404') ||
+            errorMessage.includes('not found')
+          ) {
+            shouldStopPolling = true;
+            console.warn('[useChat] Session not found, stopping poll');
+            return;
+          }
           console.error('Error fetching messages:', error);
           captureError(error instanceof Error ? error : new Error(String(error)), {
             component: 'useChat',
@@ -287,207 +417,10 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
     },
   });
 
-  const streamingMessageRef = useRef('');
-  useEffect(() => {
-    streamingMessageRef.current = streamingMessage;
-  }, [streamingMessage]);
-
   const lastUserMessageRef = useRef<{ text: string; timestamp: number } | null>(null);
   const lastAgentMessageTimeRef = useRef<number>(0);
   const hasReceivedAgentResponseRef = useRef<boolean>(false);
-  
-  const shouldFilterMessage = useCallback((
-    agentText: string,
-    now: number,
-    _existingMessages: Message[]
-  ): boolean => {
-    const lastUserMsg = lastUserMessageRef.current;
-    if (!lastUserMsg) return false;
-    
-    const timeSinceUserMessage = now - lastUserMsg.timestamp;
-    const timeSinceLastAgent = now - lastAgentMessageTimeRef.current;
-    const related = isMessageRelated(agentText, lastUserMsg.text);
-    
-    if (hasReceivedAgentResponseRef.current && !related && timeSinceUserMessage < 60000) {
-      return true;
-    }
-    if (timeSinceLastAgent < 5000 && !related) {
-      return true;
-    }
-    
-    return false;
-  }, []);
-
-  useEffect(() => {
-    if (!sessionId || !agentId || !roomId) return;
-
-    const cleanup = createSSEStream(agentId, roomId, {
-      onChunk: (data: SSEChunkEvent) => {
-        // Handle streaming chunks
-        if (data.chunk) {
-          setStreamingMessage((prev) => {
-            const updated = prev + data.chunk;
-            streamingMessageRef.current = updated;
-            return updated;
-          });
-        }
-      },
-      onMessage: (data: SSEMessageEvent) => {
-        if (!data.text) return;
-        
-        const now = Date.now();
-        const messageId = data.messageId || `agent-${Date.now()}-${Math.random()}`;
-        
-        const agentMessage: Message = {
-          id: messageId,
-          text: data.text,
-          userId: data.agentId,
-          agentId: data.agentId,
-          sessionId: data.sessionId || sessionId,
-          createdAt: data.timestamp || new Date().toISOString(),
-          role: 'agent',
-        };
-        
-        setMessages((prev) => {
-          // Check for duplicate ID
-          if (prev.some(m => m.id === messageId)) {
-            return prev;
-          }
-          
-          // Check if should be filtered
-          if (shouldFilterMessage(data.text, now, prev)) {
-            return prev;
-          }
-          
-          // Merge and add message
-          const merged = mergeMessages(prev, [agentMessage]);
-          const lastMessage = merged[merged.length - 1];
-          
-          // Replace streaming message if exists
-          if (lastMessage?.role === 'agent' && lastMessage.id.startsWith('agent-streaming-')) {
-            return [...merged.slice(0, -1), agentMessage];
-          }
-          
-          return merged;
-        });
-        
-        // Update tracking and save
-        lastAgentMessageTimeRef.current = now;
-        hasReceivedAgentResponseRef.current = true;
-        setStreamingMessage('');
-        streamingMessageRef.current = '';
-        
-        const { isAuthenticated: auth, supabaseUserId: sbId } = authStateRef.current;
-        saveMessage(agentMessage, sbId, auth).catch((err) => {
-          console.error('[useChat] Failed to save streaming message:', err);
-          captureError(err instanceof Error ? err : new Error(String(err)), {
-            component: 'useChat',
-            action: 'saveStreamingMessage',
-            sessionId: sessionId || undefined,
-            userId: sbId || undefined,
-            metadata: { messageId: agentMessage.id, source: 'SSE_done' },
-          });
-        });
-      },
-      onError: (error) => {
-        console.error('[useChat] SSE error:', error);
-        setSseConnected(false);
-        if (error.code === 'ENDPOINT_NOT_FOUND') {
-          console.warn('[useChat] SSE endpoint not available - falling back to REST API polling');
-        } else {
-          captureError(error instanceof Error ? error : new Error(String(error)), {
-            component: 'useChat',
-            action: 'SSE_connection',
-            sessionId: sessionId || undefined,
-            agentId,
-            metadata: { errorCode: error.code, roomId },
-          });
-        }
-      },
-      onDone: () => {
-        const currentStreaming = streamingMessageRef.current;
-        if (!currentStreaming) return;
-        
-        const now = Date.now();
-        
-        setMessages((prev) => {
-          if (shouldFilterMessage(currentStreaming, now, prev)) {
-            setStreamingMessage('');
-            streamingMessageRef.current = '';
-            return prev;
-          }
-          return prev;
-        });
-        
-        if (!streamingMessageRef.current) return;
-        
-        const agentMessage: Message = {
-          id: `agent-${Date.now()}-${Math.random()}`,
-          text: currentStreaming,
-          userId: agentId,
-          agentId,
-          sessionId: sessionId || '',
-          createdAt: new Date().toISOString(),
-          role: 'agent',
-        };
-
-        setMessages((prev) => {
-          const merged = mergeMessages(prev, [agentMessage]);
-          const lastMessage = merged[merged.length - 1];
-          if (lastMessage?.role === 'agent' && lastMessage.id.startsWith('agent-streaming-')) {
-            return [...merged.slice(0, -1), agentMessage];
-          }
-          return merged;
-        });
-
-        lastAgentMessageTimeRef.current = now;
-        hasReceivedAgentResponseRef.current = true;
-        const { isAuthenticated: auth, supabaseUserId: sbId } = authStateRef.current;
-        saveMessage(agentMessage, sbId, auth).catch((err) => {
-          console.error('[useChat] Failed to save streaming message:', err);
-          captureError(err instanceof Error ? err : new Error(String(err)), {
-            component: 'useChat',
-            action: 'saveStreamingMessage',
-            sessionId: sessionId || undefined,
-            userId: sbId || undefined,
-            metadata: { messageId: agentMessage.id, source: 'SSE_done' },
-          });
-        });
-        setStreamingMessage('');
-        streamingMessageRef.current = '';
-      },
-      onOpen: () => {
-        setSseConnected(true);
-      },
-      onClose: () => {
-        setSseConnected(false);
-      },
-    });
-
-    return cleanup;
-  }, [sessionId, agentId, roomId]);
-
-  useEffect(() => {
-    if (!streamingMessage) return;
-
-    const agentMessage: Message = {
-      id: `agent-streaming-${sessionId}`,
-      text: streamingMessage,
-      userId: agentId,
-      agentId,
-      sessionId: sessionId || '',
-      createdAt: new Date().toISOString(),
-      role: 'agent',
-    };
-
-    setMessages((prev) => {
-      const lastMessage = prev[prev.length - 1];
-      if (lastMessage?.id === `agent-streaming-${sessionId}`) {
-        return [...prev.slice(0, -1), agentMessage];
-      }
-      return [...prev, agentMessage];
-    });
-  }, [streamingMessage, agentId, sessionId]);
+  const lastMessageUsedSSERef = useRef<boolean>(false);
 
   useEffect(() => {
     if (!sessionId || isAuthLoading || isLoadingRef.current) return;
@@ -513,7 +446,8 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
           return [];
         });
         if (supabaseMessages.length > 0) {
-          setMessages(supabaseMessages);
+          // Use mergeMessages to preserve any messages added during the fetch
+          setMessages((prev) => mergeMessages(prev, supabaseMessages));
           loaded = true;
           Promise.all(supabaseMessages.map(saveLocalMessage)).catch((err) => {
             console.warn('[useChat] Failed to sync to local:', err);
@@ -539,7 +473,8 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
           return [];
         });
         if (stored.length > 0) {
-          setMessages(stored);
+          // Use mergeMessages to preserve any messages added during the fetch
+          setMessages((prev) => mergeMessages(prev, stored));
           loaded = true;
         }
       }
@@ -571,7 +506,8 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
         const apiMessages = messagesResponse.messages.map((msg: any) =>
           convertApiMessageToMessage(msg, sessionId, agentId)
         );
-        setMessages(apiMessages);
+        // Use mergeMessages to preserve any messages added during the fetch
+        setMessages((prev) => mergeMessages(prev, apiMessages));
         
         const { isAuthenticated: currentAuth, supabaseUserId: currentSbId } = authStateRef.current;
         Promise.all(
@@ -597,18 +533,18 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
   useEffect(() => {
     if (sessionId !== loadedSessionRef.current) {
       setMessages([]);
-      setStreamingMessage('');
       setError(null);
-      setSseConnected(false);
       loadedSessionRef.current = null;
       isLoadingRef.current = false;
     }
   }, [sessionId]);
 
   const sendMessage = useCallback(
-    (text: string) => {
-      if (!text.trim() || !sessionId) return;
-      sendMessageMutation.mutate(text);
+    (text: string, displayText?: string) => {
+      if (!text.trim() || !sessionId) {
+        return;
+      }
+      sendMessageMutation.mutate({ text, displayText });
     },
     [sendMessageMutation, sessionId]
   );
@@ -625,9 +561,6 @@ export function useChat({ sessionId, agentId, roomId, onSessionInvalid, enableMe
     messages,
     sendMessage,
     isSending: sendMessageMutation.isPending,
-    isConnected: sseConnected,
-    isTyping: !!streamingMessage,
-    status: streamingMessage ? 'processing' : 'idle',
     error,
     memoryContext,
     memoryContextPrompt,

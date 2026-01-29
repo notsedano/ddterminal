@@ -17,9 +17,10 @@ declare global {
 }
 
 export function getApiBase(): string {
-  // Check runtime config first
-  if (typeof window !== 'undefined' && window.ELIZA_CONFIG?.apiBase) {
-    return window.ELIZA_CONFIG.apiBase;
+  // Check runtime config first (explicit check for property existence, not truthiness)
+  // This allows setting apiBase to empty string to use relative URLs (through proxy)
+  if (typeof window !== 'undefined' && window.ELIZA_CONFIG && 'apiBase' in window.ELIZA_CONFIG) {
+    return window.ELIZA_CONFIG.apiBase || '';
   }
   
   // Fall back to environment variables (support both naming conventions)

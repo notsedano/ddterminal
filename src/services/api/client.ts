@@ -37,10 +37,26 @@ apiClient.interceptors.response.use(
       const isSessionsEndpoint = requestUrl.includes('/messaging/sessions');
       
       // Handle SESSION_NOT_FOUND errors (can be 400 or 404)
-      if (isSessionsEndpoint && (errorCode === 'SESSION_NOT_FOUND' || status === 404)) {
-        // Don't log - this is expected when sessions expire, handled by caller
-        // Throw a SessionNotFoundError to make it easier to detect
-        throw new SessionNotFoundError(errorMessage, errorCode || 'SESSION_NOT_FOUND');
+      // But distinguish from AGENT_NOT_FOUND errors
+      if (isSessionsEndpoint && status === 404) {
+        // Check if it's an agent not found error (specifically mentions "Agent with ID")
+        if (errorMessage.includes('Agent with ID') && !errorMessage.includes('Session')) {
+          // This is an agent validation error, not a session error
+          console.error(`Agent not found: ${errorMessage}`);
+          throw new Error(errorMessage);
+        }
+        // Check if it's a session not found error (mentions "Session" or has SESSION_NOT_FOUND code)
+        if (
+          errorCode === 'SESSION_NOT_FOUND' ||
+          errorMessage.includes('Session with ID') ||
+          errorMessage.includes('Session not found') ||
+          (errorMessage.includes('not found') && errorMessage.includes('Session'))
+        ) {
+          // This is a session not found error - throw SessionNotFoundError so it can be handled properly
+          throw new SessionNotFoundError(errorMessage, errorCode || 'SESSION_NOT_FOUND');
+        }
+        // For any other 404 on sessions endpoint, assume it's a session not found
+        throw new SessionNotFoundError(errorMessage || 'Session not found', errorCode || 'SESSION_NOT_FOUND');
       }
       
       if (status === 401) {

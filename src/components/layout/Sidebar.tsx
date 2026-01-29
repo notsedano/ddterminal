@@ -67,6 +67,7 @@ export function Sidebar({ currentSessionId, onSessionSelect, agentId }: SidebarP
         },
         onError: (error) => {
           console.error('[Sidebar] Failed to create session:', error);
+          
           // Check if it's a storage error
           const isStorageError = error instanceof Error && (
             error.name === 'QuotaExceededError' ||
@@ -77,10 +78,20 @@ export function Sidebar({ currentSessionId, onSessionSelect, agentId }: SidebarP
             error.message.includes('no space')
           );
           
+          // Check if it's an agent not found error
+          const isAgentNotFoundError = error instanceof Error && (
+            error.message.includes('Agent with ID') ||
+            error.message.includes('not found') ||
+            error.message.includes('AGENT_NOT_FOUND')
+          );
+          
           if (isStorageError) {
             alert('Unable to create session: Browser storage is full. Please clear your browser data for this site and try again.');
+          } else if (isAgentNotFoundError) {
+            alert(`Failed to create session: Agent not found on backend.\n\nAgent ID: ${agentId}\n\nPlease verify:\n1. The agent exists on the backend server\n2. The backend URL is correct\n3. The agent ID matches your backend configuration`);
           } else {
-            alert('Failed to create session. Please try again.');
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            alert(`Failed to create session: ${errorMessage}\n\nPlease check your backend connection and try again.`);
           }
         },
       }

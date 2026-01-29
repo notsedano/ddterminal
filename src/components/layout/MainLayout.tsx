@@ -6,6 +6,8 @@ import { MatchPanel } from '@/components/match-panel';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSession } from '@/hooks/useSession';
 import { useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@/hooks/useAuth';
+import { deleteSessionFromSupabase, isSupabaseConfigured } from '@/services/supabase';
 import { useNBASchedule } from '@/hooks/useNBASchedule';
 import { cn } from '@/utils/cn';
 import { MatchupSessionProvider, useMatchupSessionContext } from '@/contexts/MatchupSessionContext';
@@ -38,8 +40,10 @@ function MainLayoutContent({ agentId }: { agentId: string }) {
   const [terminalHeight, setTerminalHeight] = useState(300);
   const { data: session } = useSession(currentSessionId);
   const queryClient = useQueryClient();
+  const { isAuthenticated, supabaseUserId } = useAuth();
   const hasCreatedSession = useRef(false);
   const isResizing = useRef(false);
+  const cleaningUpSessions = useRef<Set<string>>(new Set());
   const terminalResizeRef = useRef<HTMLDivElement>(null);
   
   const { liveGames } = useNBASchedule({ autoRefreshLive: showMatchPanel });
@@ -75,29 +79,9 @@ function MainLayoutContent({ agentId }: { agentId: string }) {
       return;
     }
     
-    const loadExistingSession = async () => {
-      try {
-        const { getAllSessions } = await import('@/services/storage/conversationStorage');
-        const { getUserId } = await import('@/utils/storage');
-        const existingSessions = await getAllSessions(getUserId());
-        
-        if (existingSessions.length > 0) {
-          const latestSession = existingSessions[0];
-          setCurrentSessionId(latestSession.sessionId);
-          setRoomId(latestSession.channelId);
-          hasCreatedSession.current = true;
-        }
-      } catch (error) {
-        console.error('Error checking existing sessions:', error);
-        captureError(error instanceof Error ? error : new Error(String(error)), {
-          component: 'MainLayout',
-          action: 'loadExistingSession',
-          metadata: { agentId },
-        });
-      }
-    };
-    
-    loadExistingSession();
+    // Don't auto-load sessions from IndexedDB - they may be stale
+    // User should select a matchup to create a new session
+    hasCreatedSession.current = true; // Prevent repeated attempts
   }, [currentSessionId, agentId, matchupContext.activeMatchupSessionId]);
 
   const handleSessionSelect = async (sessionId: string) => {
@@ -134,24 +118,47 @@ function MainLayoutContent({ agentId }: { agentId: string }) {
   };
 
   const handleSessionInvalid = async (invalidSessionId: string) => {
-    const storage = await import('@/services/storage/conversationStorage');
-    await storage.deleteSession(invalidSessionId).catch((err) => {
-      console.error('[MainLayout] Failed to delete session:', err);
-      captureError(err instanceof Error ? err : new Error(String(err)), {
-        component: 'MainLayout',
-        action: 'handleSessionInvalid',
-        metadata: { sessionId: invalidSessionId },
+    // Prevent concurrent cleanup of the same session
+    if (cleaningUpSessions.current.has(invalidSessionId)) {
+      console.log('[MainLayout] Already cleaning up session:', invalidSessionId);
+      return;
+    }
+    
+    cleaningUpSessions.current.add(invalidSessionId);
+    console.log('[MainLayout] Session invalid, cleaning up:', invalidSessionId);
+    
+    try {
+      // Remove from React Query cache first to prevent retries
+      queryClient.removeQueries({ queryKey: ['session', invalidSessionId] });
+      queryClient.removeQueries({ queryKey: ['messages', invalidSessionId] });
+      
+      // Delete from local storage
+      const storage = await import('@/services/storage/conversationStorage');
+      await storage.deleteSession(invalidSessionId).catch((err) => {
+        console.error('[MainLayout] Failed to delete session from local storage:', err);
       });
-    });
-    
-    queryClient.removeQueries({ queryKey: ['session', invalidSessionId] });
-    queryClient.removeQueries({ queryKey: ['messages', invalidSessionId] });
-    queryClient.invalidateQueries({ queryKey: ['sessions'] });
-    
-    if (currentSessionId === invalidSessionId) {
-      setCurrentSessionId(null);
-      setRoomId(null);
-      hasCreatedSession.current = false;
+      
+      // Delete from Supabase if authenticated
+      if (isAuthenticated && supabaseUserId && isSupabaseConfigured()) {
+        await deleteSessionFromSupabase(invalidSessionId).catch((err) => {
+          console.error('[MainLayout] Failed to delete session from Supabase:', err);
+        });
+      }
+      
+      // Invalidate sessions list to refresh sidebar
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      
+      // Clear current session if it's the invalid one
+      if (currentSessionId === invalidSessionId) {
+        setCurrentSessionId(null);
+        setRoomId(null);
+        hasCreatedSession.current = true; // Prevent auto-loading stale sessions
+      }
+    } finally {
+      // Remove from cleanup set after a delay to allow for any pending operations
+      setTimeout(() => {
+        cleaningUpSessions.current.delete(invalidSessionId);
+      }, 1000);
     }
   };
 

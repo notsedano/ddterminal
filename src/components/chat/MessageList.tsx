@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { MessageBubble } from './MessageBubble';
-import { TypingIndicator } from './TypingIndicator';
 import { ThoughtStream } from './ThoughtStream';
 import { ScrollArea } from '@/components/ui/ScrollArea';
 import { HackerBackground } from '@/registry/eldoraui/hacker-background';
@@ -8,10 +7,10 @@ import { cn } from '@/utils/cn';
 import type { Message, PredictionThought } from '@/types';
 import { MarketButton } from '@/components/match-panel/MarketButton';
 import ddThumbnail from '@assets/dd-idl1.gif';
+import ddThinking from '@assets/dd thinking.gif';
 
 export interface MessageListProps {
   messages: Message[];
-  isTyping?: boolean;
   onPredictClick?: () => void;
   isPredicting?: boolean;
   predictionThoughts?: PredictionThought[];
@@ -20,7 +19,6 @@ export interface MessageListProps {
 
 export function MessageList({ 
   messages, 
-  isTyping,
   onPredictClick,
   isPredicting = false,
   predictionThoughts = [],
@@ -58,7 +56,7 @@ export function MessageList({
       }
     }, 100);
     return () => clearTimeout(timer);
-  }, [messages, isTyping]);
+  }, [messages, isPredicting]);
 
   return (
     <div className="relative flex-1 h-full overflow-hidden" style={{ backgroundColor: '#1500FF' }}>
@@ -69,11 +67,26 @@ export function MessageList({
         "transition-opacity duration-300 ease-in-out",
         isImageVisible ? "opacity-100" : "opacity-0"
       )}>
-        <div className="pointer-events-none">
+        <div className="pointer-events-none relative w-[120px] h-[120px] sm:w-[160px] sm:h-[160px] md:w-[200px] md:h-[200px] lg:w-[240px] lg:h-[240px]">
+          {/* Idle image */}
           <img 
             src={ddThumbnail} 
             alt="Daredevil" 
-            className="w-[120px] h-[120px] sm:w-[160px] sm:h-[160px] md:w-[200px] md:h-[200px] lg:w-[240px] lg:h-[240px] object-contain"
+            className={cn(
+              "absolute inset-0 w-full h-full object-contain",
+              "transition-opacity duration-300 ease-in-out",
+              isPredicting ? "opacity-0" : "opacity-100"
+            )}
+          />
+          {/* Thinking image */}
+          <img 
+            src={ddThinking} 
+            alt="Daredevil Thinking" 
+            className={cn(
+              "absolute inset-0 w-full h-full object-contain",
+              "transition-opacity duration-300 ease-in-out",
+              isPredicting ? "opacity-100" : "opacity-0"
+            )}
           />
         </div>
         
@@ -106,7 +119,6 @@ export function MessageList({
             </div>
           )}
           
-          {isTyping && <TypingIndicator />}
           <div className="h-[120px] sm:h-[160px] md:h-[200px] lg:h-[240px] flex-shrink-0" />
           <div ref={messagesEndRef} />
         </div>

@@ -1,0 +1,17 @@
+Configure agent "test-dd" (ID: 71196e85-8a16-0910-98e5-e2d2ee3018db) to respond via SSE streaming.
+
+CURRENT ISSUE: Agent receives messages but does NOT generate responses. Only sends user_message event, then times out.
+
+REQUIRED: After receiving POST /api/messaging/sessions/:sessionId/messages with {"content":"...","transport":"sse"}, agent must:
+
+1. Send user_message event (already working)
+2. Process the message through LLM/AI
+3. Stream response chunks via "chunk" events: event: chunk\ndata: {"chunk":"text","messageId":"..."}
+4. Send complete message via "message" event: event: message\ndata: {"messageId":"...","text":"full response","userId":"...","agentId":"71196e85-8a16-0910-98e5-e2d2ee3018db","sessionId":"...","channelId":"..."}
+5. Send completion via "done" event: event: done\ndata: {"text":"..."}
+
+OPTIONAL: Send "thought" events for prediction mode: event: thought\ndata: {"thought":"...","step":"...","progress":50}
+
+ERRORS: Send event: error\ndata: {"error":"message","code":"CODE"}
+
+CHECK: Agent LLM configuration, API keys, character prompts, message processing pipeline. Agent must actively generate responses, not just acknowledge receipt.
