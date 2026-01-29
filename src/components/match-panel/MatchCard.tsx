@@ -539,8 +539,9 @@ const GameMarketDisplay = memo(function GameMarketDisplay({ market, totalVolume,
 
       {/* Total Event Volume */}
       {totalVolume > 0 && (
-        <div className="flex items-center justify-center gap-1 text-[10px] text-muted-foreground/70">
-          <span className="hud-data">Event Volume: ${formatVolume(totalVolume)}</span>
+        <div className="flex items-center justify-center gap-1 text-[13px] text-muted-foreground/70">
+          <span className="hud-data">Event Volume: </span>
+          <span className="hud-data text-green-500">{formatVolume(totalVolume)}</span>
         </div>
       )}
 
