@@ -21,14 +21,6 @@ apiClient.interceptors.request.use((config) => {
   // Set baseURL dynamically on each request
   config.baseURL = apiBase ? `${apiBase}/api` : '/api';
   
-  // Debug logging for production issues
-  console.log('[API Client] Request config:', {
-    hostname: typeof window !== 'undefined' ? window.location.hostname : 'server',
-    apiBase,
-    baseURL: config.baseURL,
-    url: config.url,
-  });
-  
   // Set auth token if available
   if (authToken) {
     config.headers.Authorization = `Bearer ${authToken}`;
