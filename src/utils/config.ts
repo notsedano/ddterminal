@@ -1,13 +1,11 @@
 /**
- * Configuration utility that supports both environment variables and runtime config
- * Priority: window.ELIZA_CONFIG > environment variables > production defaults
+ * Configuration utility for backend API connection
+ * SIMPLE APPROACH: Check hostname at runtime to determine backend URL
  */
 
 // Production backend configuration - hardcoded for reliability
-const PRODUCTION_CONFIG = {
-  apiBase: 'https://3a6615a6-aeris-agent.containers.elizacloud.ai',
-  agentId: '71196e85-8a16-0910-98e5-e2d2ee3018db',
-};
+const PRODUCTION_API_BASE = 'https://3a6615a6-aeris-agent.containers.elizacloud.ai';
+const PRODUCTION_AGENT_ID = '71196e85-8a16-0910-98e5-e2d2ee3018db';
 
 interface ElizaConfig {
   apiBase?: string;
@@ -23,57 +21,44 @@ declare global {
 }
 
 /**
- * Detect if we're running in production (Vercel deployment)
+ * Check if we're running on localhost (development)
  */
-function isProduction(): boolean {
-  if (typeof window === 'undefined') return false;
+function isLocalhost(): boolean {
+  if (typeof window === 'undefined') return true; // SSR = treat as dev
   const hostname = window.location.hostname;
-  // Production: Vercel deployments (*.vercel.app) or custom domains (not localhost)
-  return hostname.includes('vercel.app') || 
-         (!hostname.includes('localhost') && !hostname.includes('127.0.0.1'));
+  return hostname === 'localhost' || hostname === '127.0.0.1';
 }
 
 export function getApiBase(): string {
-  // Check runtime config first (explicit check for property existence, not truthiness)
-  // This allows setting apiBase to empty string to use relative URLs (through proxy)
-  if (typeof window !== 'undefined' && window.ELIZA_CONFIG && 'apiBase' in window.ELIZA_CONFIG) {
-    return window.ELIZA_CONFIG.apiBase || '';
+  // Runtime override takes highest priority
+  if (typeof window !== 'undefined' && window.ELIZA_CONFIG?.apiBase) {
+    return window.ELIZA_CONFIG.apiBase;
   }
   
-  // Check environment variables
-  const envApiBase = import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_BASE_URL;
-  if (envApiBase) {
-    return envApiBase;
+  // SIMPLE: If localhost, use empty string (Vite proxy)
+  // Otherwise, ALWAYS use production backend
+  if (isLocalhost()) {
+    return ''; // Vite dev server proxy handles /api
   }
   
-  // In production, use hardcoded backend URL (bypasses env var issues)
-  if (isProduction()) {
-    return PRODUCTION_CONFIG.apiBase;
-  }
-  
-  // Local development: use empty string (Vite proxy handles /api)
-  return '';
+  // Production: always use hardcoded backend URL
+  // This bypasses all env var issues
+  return PRODUCTION_API_BASE;
 }
 
 export function getAgentId(): string {
-  // Check runtime config first
+  // Runtime override takes highest priority
   if (typeof window !== 'undefined' && window.ELIZA_CONFIG?.agentId) {
     return window.ELIZA_CONFIG.agentId;
   }
   
-  // Check environment variable
-  const envAgentId = import.meta.env.VITE_AGENT_ID;
-  if (envAgentId) {
-    return envAgentId;
+  // SIMPLE: If localhost, check env var, otherwise use production agent ID
+  if (isLocalhost()) {
+    return import.meta.env.VITE_AGENT_ID || '';
   }
   
-  // In production, use hardcoded agent ID
-  if (isProduction()) {
-    return PRODUCTION_CONFIG.agentId;
-  }
-  
-  // Local development fallback
-  return '';
+  // Production: always use hardcoded agent ID
+  return PRODUCTION_AGENT_ID;
 }
 
 export function getAuthToken(): string | undefined {
