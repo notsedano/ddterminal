@@ -32,6 +32,10 @@
       "destination": "/api/polymarket/events"
     },
     {
+      "source": "/api/messaging/:path*",
+      "destination": "/api/messaging/[...path]"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

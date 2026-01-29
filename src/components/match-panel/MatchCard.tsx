@@ -537,13 +537,6 @@ const GameMarketDisplay = memo(function GameMarketDisplay({ market, totalVolume,
         })}
       </div>
 
-      {/* Market Question */}
-      {market.question && (
-        <p className="text-[10px] text-center text-muted-foreground/70 truncate">
-          {market.question}
-        </p>
-      )}
-
       {/* Total Event Volume */}
       {totalVolume > 0 && (
         <div className="flex items-center justify-center gap-1 text-[10px] text-muted-foreground/70">
