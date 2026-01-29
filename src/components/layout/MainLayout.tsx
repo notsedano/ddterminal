@@ -117,7 +117,7 @@ function MainLayoutContent({ agentId }: { agentId: string }) {
       }
   };
 
-  const handleSessionInvalid = async (invalidSessionId: string) => {
+  const handleSessionInvalid = useCallback(async (invalidSessionId: string) => {
     // Prevent concurrent cleanup of the same session
     if (cleaningUpSessions.current.has(invalidSessionId)) {
       console.log('[MainLayout] Already cleaning up session:', invalidSessionId);
@@ -160,7 +160,15 @@ function MainLayoutContent({ agentId }: { agentId: string }) {
         cleaningUpSessions.current.delete(invalidSessionId);
       }, 1000);
     }
-  };
+  }, [queryClient, isAuthenticated, supabaseUserId, currentSessionId]);
+
+  // Clear session if useSession returns null (session not found on backend)
+  useEffect(() => {
+    if (currentSessionId && session === null) {
+      console.warn('[MainLayout] Session not found on backend, clearing current session:', currentSessionId);
+      handleSessionInvalid(currentSessionId);
+    }
+  }, [currentSessionId, session, handleSessionInvalid]);
 
   useEffect(() => {
     if (!isResizing.current) return;

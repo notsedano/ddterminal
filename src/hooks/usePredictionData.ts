@@ -488,21 +488,18 @@ export function usePredictionData(): PredictionData | null {
 }
 
 /**
- * Build a comprehensive prediction message from all available data
+ * Build Part 1: Sports Data Info
+ * Includes: injuries, stats, history, standings, betting indicators, live scores
+ * Max 4000 characters
  */
-export function buildComprehensivePredictionMessage(data: PredictionData | null): string {
+export function buildSportsDataMessage(data: PredictionData | null): string {
   if (!data) {
-    return `🎯 PREDICTION REQUEST
+    return `🎯 PREDICTION REQUEST - PART 1/3: SPORTS DATA
 
-Please analyze the current NBA matchup and provide a detailed prediction.
+⚠️ DO NOT RESPOND YET - This is Part 1 of 3.
 
-I need:
-1. Your prediction for the winner
-2. Key factors influencing your decision
-3. Confidence level (Low/Medium/High)
-4. Any relevant insights or warnings
-
-Please use the latest available data to make your prediction.`;
+You will receive Part 2 (Market Data) and Part 3 (Analysis Instructions) next.
+Wait for ALL 3 parts before generating any response.`;
   }
   
   const { homeTeam, awayTeam } = data;
@@ -510,9 +507,7 @@ Please use the latest available data to make your prediction.`;
   const scheduled = new Date(data.scheduledTime).toLocaleString();
   
   const parts: string[] = [
-    `🎯 PREDICTION REQUEST`,
-    ``,
-    `Please analyze the following NBA matchup and provide a detailed prediction:`,
+    `🎯 PREDICTION REQUEST - PART 1/3: SPORTS DATA`,
     ``,
     `═══════════════════════════════════════`,
     `📊 MATCHUP: ${matchupInfo}`,
@@ -533,81 +528,6 @@ Please use the latest available data to make your prediction.`;
     }
   }
   
-  // Comprehensive Betting Markets
-  if (data.bettingMarkets && data.bettingMarkets.hasMarkets) {
-    const bm = data.bettingMarkets;
-    parts.push(``);
-    parts.push(`💰 AVAILABLE BETTING MARKETS (Polymarket):`);
-    parts.push(`  Total Market Volume: $${bm.totalVolume.toLocaleString()}`);
-    
-    // Moneyline
-    if (bm.moneyline) {
-      parts.push(``);
-      parts.push(`  🎯 MONEYLINE (Winner):`);
-      parts.push(`    Question: ${bm.moneyline.question}`);
-      for (const o of bm.moneyline.outcomes) {
-        parts.push(`    • ${o.name}: ${o.probability} (${o.americanOdds})`);
-      }
-      parts.push(`    Volume: $${bm.moneyline.volume.toLocaleString()}`);
-    }
-    
-    // Spreads
-    if (bm.spreads.length > 0) {
-      parts.push(``);
-      parts.push(`  📊 SPREAD OPTIONS:`);
-      for (const spread of bm.spreads.slice(0, 3)) {
-        parts.push(`    ${spread.question}${spread.line !== undefined ? ` (Line: ${spread.line > 0 ? '+' : ''}${spread.line})` : ''}`);
-        for (const o of spread.outcomes) {
-          parts.push(`      • ${o.name}: ${o.probability} (${o.americanOdds})`);
-        }
-        parts.push(`      Volume: $${spread.volume.toLocaleString()}`);
-      }
-    }
-    
-    // Totals (Over/Under)
-    if (bm.totals.length > 0) {
-      parts.push(``);
-      parts.push(`  📈 OVER/UNDER OPTIONS:`);
-      for (const total of bm.totals.slice(0, 3)) {
-        parts.push(`    ${total.question}${total.line !== undefined ? ` (Line: ${total.line})` : ''}`);
-        for (const o of total.outcomes) {
-          parts.push(`      • ${o.name}: ${o.probability} (${o.americanOdds})`);
-        }
-        parts.push(`      Volume: $${total.volume.toLocaleString()}`);
-      }
-    }
-    
-    // Props
-    if (bm.props.length > 0) {
-      parts.push(``);
-      parts.push(`  🎲 PLAYER PROPS:`);
-      for (const prop of bm.props.slice(0, 5)) {
-        parts.push(`    ${prop.question}`);
-        for (const o of prop.outcomes) {
-          parts.push(`      • ${o.name}: ${o.probability} (${o.americanOdds})`);
-        }
-        parts.push(`      Volume: $${prop.volume.toLocaleString()}`);
-      }
-    }
-  } else if (data.market) {
-    // Fallback to basic market data if comprehensive markets not available
-    parts.push(``);
-    parts.push(`💰 MARKET DATA (Polymarket):`);
-    parts.push(`  • Market Type: ${data.market.marketType || 'Moneyline'}`);
-    if (data.market.line !== undefined) {
-      parts.push(`  • Line: ${data.market.line > 0 ? '+' : ''}${data.market.line}`);
-    }
-    if (data.market.homeOdds !== undefined) {
-      parts.push(`  • ${homeTeam.abbreviation} Win Probability: ${(data.market.homeOdds * 100).toFixed(1)}%`);
-    }
-    if (data.market.awayOdds !== undefined) {
-      parts.push(`  • ${awayTeam.abbreviation} Win Probability: ${(data.market.awayOdds * 100).toFixed(1)}%`);
-    }
-    if (data.market.volume !== undefined) {
-      parts.push(`  • Market Volume: $${data.market.volume.toLocaleString()}`);
-    }
-  }
-  
   // Live Scores (if applicable)
   if (data.scores) {
     parts.push(``);
@@ -618,59 +538,6 @@ Please use the latest available data to make your prediction.`;
     if (scoreDiff !== 0) {
       const leader = scoreDiff > 0 ? homeTeam.abbreviation : awayTeam.abbreviation;
       parts.push(`  • ${leader} leading by ${Math.abs(scoreDiff)}`);
-    }
-  }
-  
-  // Betting Indicators
-  if (data.bettingIndicators) {
-    const bi = data.bettingIndicators;
-    parts.push(``);
-    parts.push(`📊 BETTING INDICATORS:`);
-    
-    // Rest and fatigue
-    parts.push(`  REST/FATIGUE:`);
-    if (bi.homeIsBackToBack) {
-      parts.push(`    ⚠️ ${homeTeam.abbreviation} on BACK-TO-BACK (fatigued)`);
-    } else {
-      parts.push(`    • ${homeTeam.abbreviation}: ${bi.homeRestDays} day${bi.homeRestDays !== 1 ? 's' : ''} rest`);
-    }
-    if (bi.awayIsBackToBack) {
-      parts.push(`    ⚠️ ${awayTeam.abbreviation} on BACK-TO-BACK (fatigued)`);
-    } else {
-      parts.push(`    • ${awayTeam.abbreviation}: ${bi.awayRestDays} day${bi.awayRestDays !== 1 ? 's' : ''} rest`);
-    }
-    
-    // Streaks
-    parts.push(`  CURRENT STREAKS:`);
-    parts.push(`    • ${homeTeam.abbreviation}: ${bi.homeStreak.type}${bi.homeStreak.count} (${bi.homeStreak.type === 'W' ? 'winning' : 'losing'} streak)`);
-    parts.push(`    • ${awayTeam.abbreviation}: ${bi.awayStreak.type}${bi.awayStreak.count} (${bi.awayStreak.type === 'W' ? 'winning' : 'losing'} streak)`);
-    
-    // Last 10 games
-    parts.push(`  LAST 10 GAMES:`);
-    parts.push(`    • ${homeTeam.abbreviation}: ${bi.homeLast10.wins}-${bi.homeLast10.losses}`);
-    parts.push(`    • ${awayTeam.abbreviation}: ${bi.awayLast10.wins}-${bi.awayLast10.losses}`);
-    
-    // Head-to-Head
-    if (bi.h2hRecord.total > 0) {
-      parts.push(`  HEAD-TO-HEAD (recent):`);
-      parts.push(`    • ${homeTeam.abbreviation}: ${bi.h2hRecord.homeWins} wins`);
-      parts.push(`    • ${awayTeam.abbreviation}: ${bi.h2hRecord.awayWins} wins`);
-      if (bi.h2hAverageTotal > 0) {
-        parts.push(`    • Avg total points in H2H: ${bi.h2hAverageTotal.toFixed(1)}`);
-      }
-    }
-    
-    // Market Efficiency
-    parts.push(`  MARKET EFFICIENCY: ${bi.marketEfficiency.toUpperCase()}`);
-    
-    // Betting Signals
-    if (bi.signals.length > 0) {
-      parts.push(``);
-      parts.push(`⚡ BETTING SIGNALS:`);
-      for (const signal of bi.signals.slice(0, 5)) {
-        const confidenceIcon = signal.confidence === 'high' ? '🔴' : signal.confidence === 'medium' ? '🟡' : '🟢';
-        parts.push(`  ${confidenceIcon} [${signal.confidence.toUpperCase()}] ${signal.description}`);
-      }
     }
   }
   
@@ -786,33 +653,353 @@ Please use the latest available data to make your prediction.`;
     }
   }
   
-  // Final request with betting recommendations
-  parts.push(``);
-  parts.push(`═══════════════════════════════════════`);
-  parts.push(`🎯 ANALYSIS REQUEST`);
-  parts.push(`Based on ALL the above data, please provide:`);
-  parts.push(``);
-  parts.push(`1. WINNER PREDICTION: Who wins? (${awayTeam.name} or ${homeTeam.name})`);
-  parts.push(`2. KEY FACTORS: What data points most influenced your decision?`);
-  parts.push(`3. CONFIDENCE LEVEL: Low/Medium/High with reasoning`);
-  parts.push(``);
-  parts.push(`🎰 BETTING RECOMMENDATIONS:`);
-  parts.push(`Based on the available betting markets above, recommend the BEST betting options:`);
-  parts.push(`4. BEST BET TYPE: Which market offers the best value?`);
-  parts.push(`   - Moneyline (straight winner)`);
-  parts.push(`   - Spread (point differential)`);
-  parts.push(`   - Over/Under (total points)`);
-  parts.push(`   - Player Props (if any stand out)`);
-  parts.push(`   - Or PASS if no good value exists`);
-  parts.push(``);
-  parts.push(`5. SPECIFIC RECOMMENDATION: If betting, what exact bet and why?`);
-  parts.push(`   Include the specific line/odds you're recommending.`);
-  parts.push(``);
-  parts.push(`6. VALUE ANALYSIS: Are the market odds accurate or is there an edge?`);
-  parts.push(`   Consider injuries, fatigue, recent form, and market inefficiencies.`);
-  parts.push(``);
-  parts.push(`7. RISK ASSESSMENT: What could go wrong with your recommendation?`);
-  parts.push(`═══════════════════════════════════════`);
+  // Betting Indicators
+  if (data.bettingIndicators) {
+    const bi = data.bettingIndicators;
+    parts.push(``);
+    parts.push(`📊 BETTING INDICATORS:`);
+    
+    // Rest and fatigue
+    parts.push(`  REST/FATIGUE:`);
+    if (bi.homeIsBackToBack) {
+      parts.push(`    ⚠️ ${homeTeam.abbreviation} on BACK-TO-BACK (fatigued)`);
+    } else {
+      parts.push(`    • ${homeTeam.abbreviation}: ${bi.homeRestDays} day${bi.homeRestDays !== 1 ? 's' : ''} rest`);
+    }
+    if (bi.awayIsBackToBack) {
+      parts.push(`    ⚠️ ${awayTeam.abbreviation} on BACK-TO-BACK (fatigued)`);
+    } else {
+      parts.push(`    • ${awayTeam.abbreviation}: ${bi.awayRestDays} day${bi.awayRestDays !== 1 ? 's' : ''} rest`);
+    }
+    
+    // Streaks
+    parts.push(`  CURRENT STREAKS:`);
+    parts.push(`    • ${homeTeam.abbreviation}: ${bi.homeStreak.type}${bi.homeStreak.count} (${bi.homeStreak.type === 'W' ? 'winning' : 'losing'} streak)`);
+    parts.push(`    • ${awayTeam.abbreviation}: ${bi.awayStreak.type}${bi.awayStreak.count} (${bi.awayStreak.type === 'W' ? 'winning' : 'losing'} streak)`);
+    
+    // Last 10 games
+    parts.push(`  LAST 10 GAMES:`);
+    parts.push(`    • ${homeTeam.abbreviation}: ${bi.homeLast10.wins}-${bi.homeLast10.losses}`);
+    parts.push(`    • ${awayTeam.abbreviation}: ${bi.awayLast10.wins}-${bi.awayLast10.losses}`);
+    
+    // Head-to-Head
+    if (bi.h2hRecord.total > 0) {
+      parts.push(`  HEAD-TO-HEAD (recent):`);
+      parts.push(`    • ${homeTeam.abbreviation}: ${bi.h2hRecord.homeWins} wins`);
+      parts.push(`    • ${awayTeam.abbreviation}: ${bi.h2hRecord.awayWins} wins`);
+      if (bi.h2hAverageTotal > 0) {
+        parts.push(`    • Avg total points in H2H: ${bi.h2hAverageTotal.toFixed(1)}`);
+      }
+    }
+    
+    // Market Efficiency
+    parts.push(`  MARKET EFFICIENCY: ${bi.marketEfficiency.toUpperCase()}`);
+    
+    // Betting Signals
+    if (bi.signals.length > 0) {
+      parts.push(``);
+      parts.push(`⚡ BETTING SIGNALS:`);
+      for (const signal of bi.signals.slice(0, 5)) {
+        const confidenceIcon = signal.confidence === 'high' ? '🔴' : signal.confidence === 'medium' ? '🟡' : '🟢';
+        parts.push(`  ${confidenceIcon} [${signal.confidence.toUpperCase()}] ${signal.description}`);
+      }
+    }
+  }
   
-  return parts.join('\n');
+  parts.push(``);
+  parts.push(`═══════════════════════════════════════`);
+  parts.push(`⚠️ IMPORTANT: This is Part 1 of 3. DO NOT respond yet.`);
+  parts.push(`You will receive Part 2 (Market Data) and Part 3 (Analysis Instructions) next.`);
+  parts.push(`Wait for ALL 3 parts before generating any response.`);
+  
+  const message = parts.join('\n');
+  
+  // Ensure we stay under 4000 characters - truncate if necessary
+  if (message.length > 4000) {
+    // Try to truncate at a newline boundary first
+    const maxLength = 3997; // Leave room for "..."
+    let truncated = message.substring(0, maxLength);
+    const lastNewline = truncated.lastIndexOf('\n');
+    
+    // If we find a newline in the last 100 chars, use it for cleaner truncation
+    if (lastNewline > maxLength - 100) {
+      truncated = message.substring(0, lastNewline);
+    } else {
+      // Otherwise, try to truncate at a space
+      const lastSpace = truncated.lastIndexOf(' ');
+      if (lastSpace > maxLength - 50) {
+        truncated = message.substring(0, lastSpace);
+      }
+    }
+    
+    return truncated + '...';
+  }
+  
+  return message;
+}
+
+/**
+ * Build Part 2: Market Info
+ * Includes: betting markets, odds, volume, market efficiency
+ * Max 4000 characters
+ */
+export function buildMarketDataMessage(data: PredictionData | null): string {
+  if (!data) {
+    return `🎯 PREDICTION REQUEST - PART 2/3: MARKET DATA
+
+⚠️ DO NOT RESPOND YET - This is Part 2 of 3.
+
+You have already received Part 1 (Sports Data).
+You will receive Part 3 (Analysis Instructions) next.
+Wait for Part 3 before generating any response.`;
+  }
+  
+  const { homeTeam, awayTeam } = data;
+  
+  const parts: string[] = [
+    `🎯 PREDICTION REQUEST - PART 2/3: MARKET DATA`,
+    ``,
+    `═══════════════════════════════════════`,
+    `📊 MATCHUP: ${awayTeam.name} @ ${homeTeam.name}`,
+    `═══════════════════════════════════════`,
+  ];
+  
+  // Comprehensive Betting Markets
+  if (data.bettingMarkets && data.bettingMarkets.hasMarkets) {
+    const bm = data.bettingMarkets;
+    parts.push(``);
+    parts.push(`💰 AVAILABLE BETTING MARKETS (Polymarket):`);
+    parts.push(`  Total Market Volume: $${bm.totalVolume.toLocaleString()}`);
+    
+    // Moneyline
+    if (bm.moneyline) {
+      parts.push(``);
+      parts.push(`  🎯 MONEYLINE (Winner):`);
+      parts.push(`    Question: ${bm.moneyline.question}`);
+      for (const o of bm.moneyline.outcomes) {
+        parts.push(`    • ${o.name}: ${o.probability} (${o.americanOdds})`);
+      }
+      parts.push(`    Volume: $${bm.moneyline.volume.toLocaleString()}`);
+    }
+    
+    // Spreads
+    if (bm.spreads.length > 0) {
+      parts.push(``);
+      parts.push(`  📊 SPREAD OPTIONS:`);
+      for (const spread of bm.spreads.slice(0, 3)) {
+        parts.push(`    ${spread.question}${spread.line !== undefined ? ` (Line: ${spread.line > 0 ? '+' : ''}${spread.line})` : ''}`);
+        for (const o of spread.outcomes) {
+          parts.push(`      • ${o.name}: ${o.probability} (${o.americanOdds})`);
+        }
+        parts.push(`      Volume: $${spread.volume.toLocaleString()}`);
+      }
+    }
+    
+    // Totals (Over/Under)
+    if (bm.totals.length > 0) {
+      parts.push(``);
+      parts.push(`  📈 OVER/UNDER OPTIONS:`);
+      for (const total of bm.totals.slice(0, 3)) {
+        parts.push(`    ${total.question}${total.line !== undefined ? ` (Line: ${total.line})` : ''}`);
+        for (const o of total.outcomes) {
+          parts.push(`      • ${o.name}: ${o.probability} (${o.americanOdds})`);
+        }
+        parts.push(`      Volume: $${total.volume.toLocaleString()}`);
+      }
+    }
+    
+    // Props
+    if (bm.props.length > 0) {
+      parts.push(``);
+      parts.push(`  🎲 PLAYER PROPS:`);
+      for (const prop of bm.props.slice(0, 5)) {
+        parts.push(`    ${prop.question}`);
+        for (const o of prop.outcomes) {
+          parts.push(`      • ${o.name}: ${o.probability} (${o.americanOdds})`);
+        }
+        parts.push(`      Volume: $${prop.volume.toLocaleString()}`);
+      }
+    }
+  } else if (data.market) {
+    // Fallback to basic market data if comprehensive markets not available
+    parts.push(``);
+    parts.push(`💰 MARKET DATA (Polymarket):`);
+    parts.push(`  • Market Type: ${data.market.marketType || 'Moneyline'}`);
+    if (data.market.line !== undefined) {
+      parts.push(`  • Line: ${data.market.line > 0 ? '+' : ''}${data.market.line}`);
+    }
+    if (data.market.homeOdds !== undefined) {
+      parts.push(`  • ${homeTeam.abbreviation} Win Probability: ${(data.market.homeOdds * 100).toFixed(1)}%`);
+    }
+    if (data.market.awayOdds !== undefined) {
+      parts.push(`  • ${awayTeam.abbreviation} Win Probability: ${(data.market.awayOdds * 100).toFixed(1)}%`);
+    }
+    if (data.market.volume !== undefined) {
+      parts.push(`  • Market Volume: $${data.market.volume.toLocaleString()}`);
+    }
+  } else {
+    parts.push(``);
+    parts.push(`💰 MARKET DATA: No betting market data available for this matchup.`);
+  }
+  
+  parts.push(``);
+  parts.push(`═══════════════════════════════════════`);
+  parts.push(`⚠️ IMPORTANT: This is Part 2 of 3. DO NOT respond yet.`);
+  parts.push(`You will receive Part 3 (Analysis Instructions) next.`);
+  parts.push(`Wait for Part 3 before generating any response.`);
+  
+  const message = parts.join('\n');
+  
+  // Ensure we stay under 4000 characters - truncate if necessary
+  if (message.length > 4000) {
+    // Try to truncate at a newline boundary first
+    const maxLength = 3997; // Leave room for "..."
+    let truncated = message.substring(0, maxLength);
+    const lastNewline = truncated.lastIndexOf('\n');
+    
+    // If we find a newline in the last 100 chars, use it for cleaner truncation
+    if (lastNewline > maxLength - 100) {
+      truncated = message.substring(0, lastNewline);
+    } else {
+      // Otherwise, try to truncate at a space
+      const lastSpace = truncated.lastIndexOf(' ');
+      if (lastSpace > maxLength - 50) {
+        truncated = message.substring(0, lastSpace);
+      }
+    }
+    
+    return truncated + '...';
+  }
+  
+  return message;
+}
+
+/**
+ * Build Part 3: Other Info & Analysis Instructions
+ * Includes: final analysis request with 3-phase response instructions
+ * Max 4000 characters
+ */
+export function buildOtherInfoMessage(data: PredictionData | null): string {
+  if (!data) {
+    return `🎯 PREDICTION REQUEST - PART 3/3: ANALYSIS INSTRUCTIONS
+
+✅ ALL 3 PARTS RECEIVED - BEGIN YOUR ANALYSIS NOW
+
+You have received:
+- Part 1: Sports Data (injuries, stats, history, indicators)
+- Part 2: Market Data (betting markets, odds)
+- Part 3: This analysis request
+
+🚀 START YOUR RESPONSE NOW - Provide your complete analysis in 3 phases:
+1. Sportdata & Market Analysis
+2. Intelligent Reasoning & Winner Prediction  
+3. Bet Recommendation`;
+  }
+  
+  const { homeTeam, awayTeam } = data;
+  const matchupInfo = `${awayTeam.name} @ ${homeTeam.name}`;
+  
+  const parts: string[] = [
+    `🎯 PREDICTION REQUEST - PART 3/3: ANALYSIS INSTRUCTIONS`,
+    ``,
+    `═══════════════════════════════════════`,
+    `📊 MATCHUP: ${matchupInfo}`,
+    `═══════════════════════════════════════`,
+    ``,
+    `✅ ALL 3 PARTS RECEIVED - BEGIN YOUR ANALYSIS NOW`,
+    ``,
+    `You have received:`,
+    `  • Part 1: Sports Data (injuries, stats, history, betting indicators)`,
+    `  • Part 2: Market Data (betting markets, odds, volume)`,
+    `  • Part 3: This analysis request`,
+    ``,
+    `═══════════════════════════════════════`,
+    `🎯 NOW PROVIDE YOUR COMPLETE ANALYSIS IN 3 PHASES:`,
+    `═══════════════════════════════════════`,
+    ``,
+    `PHASE 1: SPORTDATA & MARKET ANALYSIS`,
+    `Analyze the sports data and market information you received:`,
+    `  • Summarize key injuries and their impact`,
+    `  • Analyze player stats and recent form`,
+    `  • Evaluate betting indicators (rest, streaks, H2H)`,
+    `  • Assess market efficiency and betting signals`,
+    `  • Review available betting markets and odds`,
+    ``,
+    `PHASE 2: INTELLIGENT REASONING & WINNER PREDICTION`,
+    `Based on your Phase 1 analysis, provide:`,
+    `  1. WINNER PREDICTION: Who wins? (${awayTeam.name} or ${homeTeam.name})`,
+    `  2. KEY FACTORS: What data points most influenced your decision?`,
+    `  3. CONFIDENCE LEVEL: Low/Medium/High with reasoning`,
+    `  4. RISK FACTORS: What could go wrong with your prediction?`,
+    ``,
+    `PHASE 3: BET RECOMMENDATION`,
+    `Based on the available betting markets, provide:`,
+    `  5. BEST BET TYPE: Which market offers the best value?`,
+    `     - Moneyline (straight winner)`,
+    `     - Spread (point differential)`,
+    `     - Over/Under (total points)`,
+    `     - Player Props (if any stand out)`,
+    `     - Or PASS if no good value exists`,
+    `  6. SPECIFIC RECOMMENDATION: If betting, what exact bet and why?`,
+    `     Include the specific line/odds you're recommending.`,
+    `  7. VALUE ANALYSIS: Are the market odds accurate or is there an edge?`,
+    `     Consider injuries, fatigue, recent form, and market inefficiencies.`,
+    ``,
+    `═══════════════════════════════════════`,
+    `🚀 START YOUR RESPONSE NOW - All data has been provided.`,
+    `Structure your response with clear headers: "PHASE 1:", "PHASE 2:", "PHASE 3:"`,
+    `═══════════════════════════════════════`,
+  ];
+  
+  const message = parts.join('\n');
+  
+  // Ensure we stay under 4000 characters - truncate if necessary
+  if (message.length > 4000) {
+    // Try to truncate at a newline boundary first
+    const maxLength = 3997; // Leave room for "..."
+    let truncated = message.substring(0, maxLength);
+    const lastNewline = truncated.lastIndexOf('\n');
+    
+    // If we find a newline in the last 100 chars, use it for cleaner truncation
+    if (lastNewline > maxLength - 100) {
+      truncated = message.substring(0, lastNewline);
+    } else {
+      // Otherwise, try to truncate at a space
+      const lastSpace = truncated.lastIndexOf(' ');
+      if (lastSpace > maxLength - 50) {
+        truncated = message.substring(0, lastSpace);
+      }
+    }
+    
+    return truncated + '...';
+  }
+  
+  return message;
+}
+
+/**
+ * Build a comprehensive prediction message from all available data
+ * @deprecated Use buildSportsDataMessage, buildMarketDataMessage, and buildOtherInfoMessage instead
+ * Kept for backward compatibility
+ */
+export function buildComprehensivePredictionMessage(data: PredictionData | null): string {
+  if (!data) {
+    return `🎯 PREDICTION REQUEST
+
+Please analyze the current NBA matchup and provide a detailed prediction.
+
+I need:
+1. Your prediction for the winner
+2. Key factors influencing your decision
+3. Confidence level (Low/Medium/High)
+4. Any relevant insights or warnings
+
+Please use the latest available data to make your prediction.`;
+  }
+  
+  const sportsData = buildSportsDataMessage(data);
+  const marketData = buildMarketDataMessage(data);
+  const otherInfo = buildOtherInfoMessage(data);
+  
+  return `${sportsData}\n\n${marketData}\n\n${otherInfo}`;
 }

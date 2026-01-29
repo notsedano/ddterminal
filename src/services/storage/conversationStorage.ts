@@ -1,5 +1,6 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
 import type { Session, Message } from '@/types';
+import { sanitizeMetadata } from '@/utils/messageUtils';
 
 interface ConversationDB extends DBSchema {
   sessions: {
@@ -171,15 +172,61 @@ export async function saveMessage(message: Message): Promise<void> {
   if (storageDisabled) return;
   
   try {
-    const db = await getDB();
-    await db.put('messages', message);
-      } catch (error) {
-        if (isStorageError(error)) {
-          logStorageError('saveMessage');
-        } else {
-          throw error;
-        }
+    // Sanitize metadata to prevent circular references
+    const sanitizedMetadata = sanitizeMetadata(message.metadata);
+    
+    // Create a clean message object with only serializable values
+    const messageForStorage: Message = {
+      id: String(message.id),
+      text: String(message.text),
+      userId: String(message.userId),
+      agentId: message.agentId ? String(message.agentId) : undefined,
+      sessionId: String(message.sessionId),
+      createdAt: String(message.createdAt),
+      role: message.role,
+      metadata: sanitizedMetadata,
+    };
+    
+    // Verify the message is serializable before storing
+    try {
+      JSON.stringify(messageForStorage);
+    } catch (error) {
+      if (error instanceof Error && (error.message.includes('cyclic') || error.message.includes('circular'))) {
+        console.error('[saveMessage] Circular reference detected in message, attempting to fix:', {
+          messageId: message.id,
+          hasMetadata: !!message.metadata,
+          metadataKeys: message.metadata ? Object.keys(message.metadata) : [],
+        });
+        // If there's still a circular reference, remove metadata entirely
+        const fallbackMessage: Message = {
+          ...messageForStorage,
+          metadata: {},
+        };
+        const db = await getDB();
+        await db.put('messages', fallbackMessage);
+        return;
       }
+      throw error;
+    }
+    
+    const db = await getDB();
+    await db.put('messages', messageForStorage);
+  } catch (error) {
+    // Handle storage errors gracefully
+    if (error instanceof Error) {
+      const errorMessage = error.message || String(error);
+      if (errorMessage.includes('cyclic') || errorMessage.includes('circular') || errorMessage.includes('JSON.stringify')) {
+        console.error('[saveMessage] Failed to save message due to circular references:', {
+          messageId: message.id,
+          error: errorMessage,
+        });
+        // Don't throw - just log the error to avoid breaking the app
+        return;
+      }
+    }
+    // Re-throw non-circular-reference errors
+    throw error;
+  }
 }
 
 export async function getMessages(sessionId: string): Promise<Message[]> {

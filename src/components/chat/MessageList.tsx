@@ -13,16 +13,24 @@ export interface MessageListProps {
   messages: Message[];
   onPredictClick?: () => void;
   isPredicting?: boolean;
+  isSending?: boolean;
+  isWaitingForResponse?: boolean;
   predictionThoughts?: PredictionThought[];
   predictionProgress?: number;
+  predictionPhase?: 1 | 2 | 3 | null;
+  sessionId?: string | null;
 }
 
 export function MessageList({ 
   messages, 
   onPredictClick,
   isPredicting = false,
+  isSending = false,
+  isWaitingForResponse = false,
   predictionThoughts = [],
   predictionProgress = 0,
+  predictionPhase = null,
+  sessionId = null,
 }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -75,7 +83,7 @@ export function MessageList({
             className={cn(
               "absolute inset-0 w-full h-full object-contain",
               "transition-opacity duration-300 ease-in-out",
-              isPredicting ? "opacity-0" : "opacity-100"
+              (isPredicting || isSending || isWaitingForResponse) ? "opacity-0" : "opacity-100"
             )}
           />
           {/* Thinking image */}
@@ -85,7 +93,7 @@ export function MessageList({
             className={cn(
               "absolute inset-0 w-full h-full object-contain",
               "transition-opacity duration-300 ease-in-out",
-              isPredicting ? "opacity-100" : "opacity-0"
+              (isPredicting || isSending || isWaitingForResponse) ? "opacity-100" : "opacity-0"
             )}
           />
         </div>
@@ -97,7 +105,7 @@ export function MessageList({
             odds=""
             isHigher={true}
             onClick={onPredictClick}
-            disabled={isPredicting || !onPredictClick}
+            disabled={isPredicting || !onPredictClick || !sessionId}
             variant="gold"
             size="small"
           />
@@ -105,9 +113,28 @@ export function MessageList({
       </div>
       <ScrollArea ref={scrollAreaRef} className={cn("relative z-10 flex-1 p-4 h-full")}>
         <div className="flex flex-col gap-2 min-h-full justify-end">
-          {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
-          ))}
+          {messages
+            .filter((message) => {
+              // Filter out Parts 2/3 of prediction messages (they should be completely hidden)
+              if (message.role === 'user' && message.metadata?.isPredictionMessage) {
+                const displayText = message.metadata.displayText as string | undefined;
+                // If displayText is empty, it's Part 2/3 - hide it
+                if (!displayText || displayText.trim() === '') {
+                  return false;
+                }
+              }
+              // Also filter by content pattern as fallback
+              if (message.role === 'user' && (
+                message.text.includes('PREDICTION REQUEST - PART 2/3') ||
+                message.text.includes('PREDICTION REQUEST - PART 3/3')
+              )) {
+                return false;
+              }
+              return true;
+            })
+            .map((message) => (
+              <MessageBubble key={message.id} message={message} />
+            ))}
           
           {predictionThoughts.length > 0 && (
             <div className="my-3">
@@ -115,6 +142,7 @@ export function MessageList({
                 thoughts={predictionThoughts}
                 isStreaming={isPredicting}
                 progress={predictionProgress}
+                currentPhase={predictionPhase}
               />
             </div>
           )}

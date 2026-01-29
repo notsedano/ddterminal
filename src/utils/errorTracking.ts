@@ -67,17 +67,75 @@ export function initErrorTracking(dsn?: string): void {
 /**
  * Capture an error with context
  */
+/**
+ * Safely extract error message from any error type
+ */
+function safeExtractErrorMessage(error: Error | string): string {
+  if (typeof error === 'string') {
+    return error;
+  }
+  if (error instanceof Error) {
+    return error.message || error.name || 'Unknown error';
+  }
+  return 'Unknown error';
+}
+
+/**
+ * Safely serialize context metadata to avoid circular references
+ */
+function safeSerializeContext(context?: ErrorContext): Record<string, unknown> {
+  if (!context) return {};
+  
+  const safeContext: Record<string, unknown> = {};
+  
+  if (context.component) safeContext.component = context.component;
+  if (context.action) safeContext.action = context.action;
+  if (context.userId) safeContext.userId = context.userId;
+  if (context.sessionId) safeContext.sessionId = context.sessionId;
+  if (context.agentId) safeContext.agentId = context.agentId;
+  
+  // Safely serialize metadata if present
+  if (context.metadata) {
+    try {
+      const seen = new WeakSet();
+      const sanitized = JSON.stringify(context.metadata, (key, value) => {
+        if (typeof value === 'object' && value !== null) {
+          if (seen.has(value)) {
+            return '[Circular]';
+          }
+          seen.add(value);
+        }
+        if (typeof value === 'function') {
+          return '[Function]';
+        }
+        return value;
+      });
+      safeContext.metadata = JSON.parse(sanitized);
+    } catch {
+      safeContext.metadata = { error: 'Failed to serialize metadata' };
+    }
+  }
+  
+  return safeContext;
+}
+
 export function captureError(
   error: Error | string,
   context?: ErrorContext
 ): void {
+  const errorMessage = safeExtractErrorMessage(error);
+  const errorObj = typeof error === 'string' ? new Error(error) : error;
+  const safeContext = safeSerializeContext(context);
+
   if (!errorTrackingEnabled) {
-    // Fallback to console in development
-    console.error('[Error]', error, context);
+    // Fallback to console in development - use safe serialization
+    try {
+      console.error('[Error]', errorMessage, safeContext);
+    } catch {
+      console.error('[Error]', errorMessage);
+    }
     return;
   }
-
-  const errorObj = typeof error === 'string' ? new Error(error) : error;
 
   // Try to use Sentry if available
   if (sentryInitialized && typeof window !== 'undefined') {
@@ -90,22 +148,30 @@ export function captureError(
             action: context?.action || 'unknown',
           },
           user: context?.userId ? { id: context.userId } : undefined,
-          extra: {
-            sessionId: context?.sessionId,
-            agentId: context?.agentId,
-            ...context?.metadata,
-          },
+          extra: safeContext,
         });
       }).catch(() => {
         // Fallback to console if Sentry fails
-        console.error('[Error]', errorObj, context);
+        try {
+          console.error('[Error]', errorMessage, safeContext);
+        } catch {
+          console.error('[Error]', errorMessage);
+        }
       });
     } catch {
-      console.error('[Error]', errorObj, context);
+      try {
+        console.error('[Error]', errorMessage, safeContext);
+      } catch {
+        console.error('[Error]', errorMessage);
+      }
     }
   } else {
     // Fallback to console
-    console.error('[Error]', errorObj, context);
+    try {
+      console.error('[Error]', errorMessage, safeContext);
+    } catch {
+      console.error('[Error]', errorMessage);
+    }
   }
 }
 

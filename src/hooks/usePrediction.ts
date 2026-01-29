@@ -11,16 +11,18 @@ export interface UsePredictionReturn {
   thoughts: PredictionThought[];
   isStreaming: boolean;
   progress: number;
+  currentPhase: 1 | 2 | 3 | null;
   startThoughts: () => void;
   addRealThought: (thought: SSEThoughtEvent) => void;
   reset: () => void;
   cancel: () => void;
 }
 
-const INITIAL_STATE: Omit<PredictionState, 'prediction' | 'error' | 'predictionId'> = {
+const INITIAL_STATE: Omit<PredictionState, 'prediction' | 'error' | 'predictionId'> & { currentPhase: 1 | 2 | 3 | null } = {
   thoughts: [],
   isStreaming: false,
   progress: 0,
+  currentPhase: null,
 };
 
 const UI_ANIMATION_THOUGHTS: { type: ThoughtPhase; content: string; delay: number }[] = [
@@ -34,15 +36,6 @@ const UI_ANIMATION_THOUGHTS: { type: ThoughtPhase; content: string; delay: numbe
   { type: 'concluding', content: 'Prediction sent! Awaiting response...', delay: 6800 },
 ];
 
-function createThought(type: ThoughtPhase, content: string, progress: number): PredictionThought {
-  return {
-    id: generateUUID(),
-    type,
-    content,
-    timestamp: Date.now(),
-    progress,
-  };
-}
 
 export function usePrediction(): UsePredictionReturn {
   const [state, setState] = useState(INITIAL_STATE);
@@ -51,6 +44,7 @@ export function usePrediction(): UsePredictionReturn {
   const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const hasRealThoughtsRef = useRef(false);
   const uiAnimationStartedRef = useRef(false);
+  const currentPhaseRef = useRef<1 | 2 | 3 | null>(null);
 
   useEffect(() => {
     return () => {
@@ -73,12 +67,11 @@ export function usePrediction(): UsePredictionReturn {
     }
     hasRealThoughtsRef.current = false;
     uiAnimationStartedRef.current = false;
+    currentPhaseRef.current = null;
     setState(INITIAL_STATE);
   }, []);
 
-  const cancel = useCallback(() => {
-    reset();
-  }, [reset]);
+  const cancel = reset;
 
   const startThoughts = useCallback(() => {
     thoughtTimeoutsRef.current.forEach(clearTimeout);
@@ -90,25 +83,31 @@ export function usePrediction(): UsePredictionReturn {
     uiAnimationStartedRef.current = true;
 
     setState({
-      thoughts: [createThought('analyzing', 'Starting prediction analysis...', 5)],
+      thoughts: [{
+        id: generateUUID(),
+        type: 'analyzing',
+        content: 'Starting prediction analysis...',
+        timestamp: Date.now(),
+        progress: 5,
+      }],
       isStreaming: true,
       progress: 5,
     });
 
-    // Start UI animation as initial visual feedback
     UI_ANIMATION_THOUGHTS.forEach((thoughtData, index) => {
       const timeout = setTimeout(() => {
-        // Only add UI animation thoughts if we haven't received real thoughts yet
         setState((prev) => {
-          if (hasRealThoughtsRef.current) {
-            // Real thoughts are coming in, don't add UI animation
-            return prev;
-          }
+          if (hasRealThoughtsRef.current) return prev;
           const progress = Math.min(100, ((index + 1) / UI_ANIMATION_THOUGHTS.length) * 100);
-          const thought = createThought(thoughtData.type, thoughtData.content, progress);
           return {
             ...prev,
-            thoughts: [...prev.thoughts, thought],
+            thoughts: [...prev.thoughts, {
+              id: generateUUID(),
+              type: thoughtData.type,
+              content: thoughtData.content,
+              timestamp: Date.now(),
+              progress,
+            }],
             progress,
           };
         });
@@ -132,12 +131,35 @@ export function usePrediction(): UsePredictionReturn {
   const addRealThought = useCallback((thoughtEvent: SSEThoughtEvent) => {
     if (!thoughtEvent.thought) return;
 
+    const isFirstRealThought = !hasRealThoughtsRef.current;
     hasRealThoughtsRef.current = true;
 
-    // Map SSE thought to PredictionThought format
-    // Try to infer type from thought content or use 'reasoning' as default
-    let type: ThoughtPhase = 'reasoning';
+    // Update current phase if provided
+    if (thoughtEvent.phase) {
+      currentPhaseRef.current = thoughtEvent.phase;
+    }
+
     const thoughtLower = thoughtEvent.thought.toLowerCase();
+    let type: ThoughtPhase = 'reasoning';
+    
+    // Infer phase from content if not provided
+    let phase: 1 | 2 | 3 | undefined = thoughtEvent.phase;
+    if (!phase) {
+      if (thoughtLower.includes('phase 1') || thoughtLower.includes('sportdata') || thoughtLower.includes('market analysis') || thoughtLower.includes('analyzing data')) {
+        phase = 1;
+        currentPhaseRef.current = 1;
+      } else if (thoughtLower.includes('phase 2') || thoughtLower.includes('reasoning') || thoughtLower.includes('winner prediction') || thoughtLower.includes('intelligent reasoning')) {
+        phase = 2;
+        currentPhaseRef.current = 2;
+      } else if (thoughtLower.includes('phase 3') || thoughtLower.includes('bet recommendation') || thoughtLower.includes('betting recommendation') || thoughtLower.includes('recommendation')) {
+        phase = 3;
+        currentPhaseRef.current = 3;
+      } else if (currentPhaseRef.current) {
+        // Use current phase if we're already in one
+        phase = currentPhaseRef.current;
+      }
+    }
+    
     if (thoughtLower.includes('analyzing') || thoughtLower.includes('examining')) {
       type = 'analyzing';
     } else if (thoughtLower.includes('calculating') || thoughtLower.includes('computing')) {
@@ -148,36 +170,36 @@ export function usePrediction(): UsePredictionReturn {
       type = 'concluding';
     }
 
-    const predictionThought: PredictionThought = {
+    // Calculate progress based on phase
+    let progress = thoughtEvent.progress;
+    if (!progress && phase) {
+      // Phase 1: 0-33%, Phase 2: 33-66%, Phase 3: 66-100%
+      const phaseProgress = phase === 1 ? 33 : phase === 2 ? 66 : 100;
+      progress = phaseProgress;
+    }
+
+    const thought: PredictionThought = {
       id: generateUUID(),
       type,
       content: thoughtEvent.thought,
       timestamp: Date.now(),
-      progress: thoughtEvent.progress,
+      progress,
+      phase,
     };
 
-    setState((prev) => {
-      // If this is the first real thought, replace UI animation thoughts
-      if (prev.thoughts.length > 0 && !hasRealThoughtsRef.current) {
-        return {
-          ...prev,
-          thoughts: [predictionThought],
-          progress: thoughtEvent.progress || prev.progress,
-        };
-      }
-      // Otherwise append to existing thoughts
-      return {
-        ...prev,
-        thoughts: [...prev.thoughts, predictionThought],
-        progress: thoughtEvent.progress || prev.progress,
-      };
-    });
+    setState((prev) => ({
+      ...prev,
+      thoughts: (isFirstRealThought && prev.thoughts.length > 0) ? [thought] : [...prev.thoughts, thought],
+      progress: progress || prev.progress,
+      currentPhase: phase || currentPhaseRef.current || prev.currentPhase,
+    }));
   }, []);
 
   return {
     thoughts: state.thoughts,
     isStreaming: state.isStreaming,
     progress: state.progress,
+    currentPhase: state.currentPhase,
     startThoughts,
     addRealThought,
     reset,

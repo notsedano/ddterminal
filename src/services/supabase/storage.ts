@@ -17,6 +17,7 @@ import type {
 } from '@/types/database';
 import type { Session, Message } from '@/types';
 import type { TerminalConfig } from '@/types/auth';
+import { sanitizeMetadata } from '@/utils/messageUtils';
 
 // ============================================================================
 // User Operations
@@ -316,9 +317,15 @@ function messageRowToMessage(row: MessageRow): Message {
     ? row.metadata as Record<string, unknown>
     : undefined;
 
+  const isPredictionMessage = metadata?.isPredictionMessage === true;
+  const displayText = metadata?.displayText as string | undefined;
+  
+  // For prediction messages, use displayText if available, otherwise use stored text
+  const text = (isPredictionMessage && displayText) ? displayText : row.text;
+
   return {
     id: row.id,
-    text: row.text,
+    text,
     userId: row.user_id,
     agentId: row.agent_id || undefined,
     sessionId: row.session_id,
@@ -329,19 +336,56 @@ function messageRowToMessage(row: MessageRow): Message {
 }
 
 /**
+ * Safely stringify an object to detect circular references before Supabase operations
+ * This helps identify the source of circular references
+ */
+function safeStringifyForDebug(obj: unknown): string {
+  try {
+    return JSON.stringify(obj);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('cyclic')) {
+      // Try to identify which field has the circular reference
+      const objKeys = typeof obj === 'object' && obj !== null ? Object.keys(obj) : [];
+      throw new Error(`Circular reference detected in object with keys: ${objKeys.join(', ')}`);
+    }
+    throw error;
+  }
+}
+
+/**
  * Convert Message type to database insert format
+ * Ensures all data is fully serializable before sending to Supabase
  */
 function messageToInsert(message: Message, supabaseUserId: string): MessageInsert {
-  return {
-    id: message.id,
-    session_id: message.sessionId,
-    user_id: supabaseUserId,
-    agent_id: message.agentId || null,
-    text: message.text,
+  // Sanitize metadata first
+  const sanitizedMetadata = sanitizeMetadata(message.metadata);
+  
+  // Create the insert object with only primitive/serializable values
+  const insert: MessageInsert = {
+    id: String(message.id),
+    session_id: String(message.sessionId),
+    user_id: String(supabaseUserId),
+    agent_id: message.agentId ? String(message.agentId) : null,
+    text: String(message.text),
     role: message.role,
-    created_at: message.createdAt,
-    metadata: (message.metadata || {}) as MessageInsert['metadata'],
+    created_at: String(message.createdAt),
+    metadata: sanitizedMetadata as MessageInsert['metadata'],
   };
+  
+  // Verify the insert object is serializable before returning
+  // This will throw an error with more context if there's a circular reference
+  try {
+    safeStringifyForDebug(insert);
+  } catch (error) {
+    console.error('[messageToInsert] Circular reference detected:', {
+      messageId: message.id,
+      hasMetadata: !!message.metadata,
+      metadataKeys: message.metadata ? Object.keys(message.metadata) : [],
+    });
+    throw new Error(`Message contains circular references that cannot be serialized: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  
+  return insert;
 }
 
 /**
@@ -355,14 +399,34 @@ export async function saveMessageToSupabase(
     return;
   }
 
-  const insert = messageToInsert(message, supabaseUserId);
+  try {
+    const insert = messageToInsert(message, supabaseUserId);
 
-  const { error } = await supabase
-    .from('messages')
-    .upsert(insert, { onConflict: 'id' });
+    const { error } = await supabase
+      .from('messages')
+      .upsert(insert, { onConflict: 'id' });
 
-  if (error) {
-    throw new Error(`Failed to save message: ${error.message}`);
+    if (error) {
+      // Check if the error is related to circular references
+      const errorMessage = error.message || String(error);
+      if (errorMessage.includes('cyclic') || errorMessage.includes('circular') || errorMessage.includes('JSON.stringify')) {
+        console.error('[saveMessageToSupabase] Circular reference error from Supabase:', {
+          messageId: message.id,
+          error: errorMessage,
+          metadataKeys: message.metadata ? Object.keys(message.metadata) : [],
+        });
+        throw new Error(`Message contains circular references. Metadata keys: ${message.metadata ? Object.keys(message.metadata).join(', ') : 'none'}`);
+      }
+      throw new Error(`Failed to save message: ${errorMessage}`);
+    }
+  } catch (error) {
+    // Re-throw with more context if it's a circular reference error
+    if (error instanceof Error) {
+      if (error.message.includes('cyclic') || error.message.includes('circular') || error.message.includes('JSON.stringify')) {
+        throw new Error(`Cannot save message due to circular references: ${error.message}`);
+      }
+    }
+    throw error;
   }
 }
 

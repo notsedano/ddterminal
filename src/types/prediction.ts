@@ -70,6 +70,7 @@ export interface PredictionThought {
   content: string;
   timestamp: number;
   progress?: number; // 0-100, optional progress indicator
+  phase?: 1 | 2 | 3; // Phase number for 3-part prediction responses
 }
 
 /**
