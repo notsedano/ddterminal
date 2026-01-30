@@ -125,12 +125,19 @@ export async function getTokenPrices(tokenIds: string[]): Promise<Map<string, nu
 
   // Batch request using the /prices endpoint
   // Limit token IDs to prevent URL length issues (400 error)
-  const MAX_TOKENS_PER_REQUEST = 20;
+  // Reduced from 20 to 10 to avoid URL length limits with very long token IDs
+  const MAX_TOKENS_PER_REQUEST = 10;
   const limitedTokenIds = tokenIds.slice(0, MAX_TOKENS_PER_REQUEST);
-  const tokenIdsParam = limitedTokenIds.join(',');
+  
+  // Build URL with token_ids as multiple query parameters
+  // This is more reliable than comma-separated strings for long lists
+  const params = new URLSearchParams();
+  for (const tokenId of limitedTokenIds) {
+    params.append('token_ids', tokenId);
+  }
   
   const response = await fetch(
-    `${CLOB_API}/prices?token_ids=${encodeURIComponent(tokenIdsParam)}`,
+    `${CLOB_API}/prices?${params.toString()}`,
     { headers: { 'Accept': 'application/json' } }
   ).catch(() => null);
 

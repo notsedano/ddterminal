@@ -51,7 +51,17 @@ export default async function handler(
   for (const [key, value] of Object.entries(req.query)) {
     if (key === 'path') continue; // Skip the path parameter
     if (typeof value === 'string') {
-      queryParams.append(key, value);
+      // Special handling for token_ids: if it's a comma-separated string, split it
+      // and add each token_id as a separate query parameter
+      // Note: Vercel automatically decodes URL-encoded query params, so we can split directly
+      if (key === 'token_ids' && value.includes(',')) {
+        const tokenIds = value.split(',').map(id => id.trim()).filter(Boolean);
+        for (const tokenId of tokenIds) {
+          queryParams.append('token_ids', tokenId);
+        }
+      } else {
+        queryParams.append(key, value);
+      }
     } else if (Array.isArray(value)) {
       for (const v of value) {
         if (typeof v === 'string') {
@@ -90,13 +100,24 @@ export default async function handler(
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`Polymarket CLOB API error: ${response.status} - ${errorText}`);
+      console.error(`Request URL: ${apiUrl}`);
+      console.error(`Request path: ${apiPath}, query: ${JSON.stringify(req.query)}`);
+      
+      // Try to parse error as JSON for better error messages
+      let errorDetails = errorText;
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorDetails = errorJson.error || errorJson.message || errorText;
+      } catch {
+        // Keep original error text if not JSON
+      }
       
       return res.status(response.status).json({
         success: false,
         error: {
           code: `POLYMARKET_CLOB_${response.status}`,
           message: `Polymarket CLOB API returned ${response.status}`,
-          details: errorText,
+          details: errorDetails,
         },
         timestamp: new Date().toISOString(),
       });
