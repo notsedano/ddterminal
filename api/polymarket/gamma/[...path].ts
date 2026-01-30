@@ -99,6 +99,17 @@ export default async function handler(
       });
     }
 
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const text = await response.text();
+      console.error(`Polymarket returned non-JSON: ${contentType}`, text.substring(0, 200));
+      return res.status(502).json({
+        success: false,
+        error: { code: 'POLYMARKET_INVALID_RESPONSE', message: 'Polymarket returned non-JSON response' },
+        timestamp: new Date().toISOString(),
+      });
+    }
+
     const data = await response.json();
 
     // Cache the successful response
