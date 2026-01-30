@@ -78,35 +78,49 @@ export default async function handler(
   const apiUrl = `${GAMMA_API_BASE}/${fullPath}`;
 
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    
     const response = await fetch(apiUrl, {
       headers: {
         'Accept': 'application/json',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Origin': 'https://polymarket.com',
+        'Referer': 'https://polymarket.com/',
       },
+      signal: controller.signal,
     });
+    
+    clearTimeout(timeoutId);
+
+    const contentType = response.headers.get('content-type') || '';
+    const isJson = contentType.includes('application/json');
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`Polymarket Gamma API error: ${response.status} - ${errorText}`);
+      console.error(`Polymarket Gamma API error: ${response.status} - ${errorText.substring(0, 200)}`);
       
-      return res.status(response.status).json({
+      return res.status(502).json({
         success: false,
         error: {
           code: `POLYMARKET_GAMMA_${response.status}`,
           message: `Polymarket Gamma API returned ${response.status}`,
-          details: errorText,
+          details: isJson ? errorText : 'Non-JSON response received',
         },
         timestamp: new Date().toISOString(),
       });
     }
 
-    const contentType = response.headers.get('content-type') || '';
-    if (!contentType.includes('application/json')) {
+    if (!isJson) {
       const text = await response.text();
       console.error(`Polymarket returned non-JSON: ${contentType}`, text.substring(0, 200));
       return res.status(502).json({
         success: false,
-        error: { code: 'POLYMARKET_INVALID_RESPONSE', message: 'Polymarket returned non-JSON response' },
+        error: { 
+          code: 'POLYMARKET_INVALID_RESPONSE', 
+          message: 'Polymarket returned non-JSON response',
+          details: text.substring(0, 200),
+        },
         timestamp: new Date().toISOString(),
       });
     }
@@ -128,13 +142,14 @@ export default async function handler(
     return res.status(200).json(data);
   } catch (error) {
     console.error('Polymarket Gamma API fetch error:', error);
+    const isTimeout = error instanceof Error && error.name === 'AbortError';
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     
     return res.status(500).json({
       success: false,
       error: {
-        code: 'POLYMARKET_GAMMA_FETCH_ERROR',
-        message: 'Failed to fetch from Polymarket Gamma API',
+        code: isTimeout ? 'POLYMARKET_TIMEOUT' : 'POLYMARKET_GAMMA_FETCH_ERROR',
+        message: isTimeout ? 'Request to Polymarket API timed out' : 'Failed to fetch from Polymarket Gamma API',
         details: errorMessage,
       },
       timestamp: new Date().toISOString(),
