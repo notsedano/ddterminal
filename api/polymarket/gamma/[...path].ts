@@ -77,40 +77,55 @@ export default async function handler(
   // Build Polymarket API URL
   const apiUrl = `${GAMMA_API_BASE}/${fullPath}`;
 
-  const response = await fetch(apiUrl, {
-    headers: {
-      'Accept': 'application/json',
-    },
-  });
+  try {
+    const response = await fetch(apiUrl, {
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`Polymarket Gamma API error: ${response.status} - ${errorText}`);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Polymarket Gamma API error: ${response.status} - ${errorText}`);
+      
+      return res.status(response.status).json({
+        success: false,
+        error: {
+          code: `POLYMARKET_GAMMA_${response.status}`,
+          message: `Polymarket Gamma API returned ${response.status}`,
+          details: errorText,
+        },
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const data = await response.json();
+
+    // Cache the successful response
+    cache.set(cacheKey, {
+      data,
+      timestamp: Date.now(),
+    });
+
+    // Longer cache for static endpoints (tags, sports metadata)
+    const isStaticEndpoint = apiPath === 'tags' || apiPath === 'sports' || apiPath === 'sports/market-types';
+    const cacheSeconds = isStaticEndpoint ? 3600 : 60; // 1 hour for static, 1 minute for dynamic
+    const revalidateSeconds = isStaticEndpoint ? 7200 : 120;
+    res.setHeader('Cache-Control', `s-maxage=${cacheSeconds}, stale-while-revalidate=${revalidateSeconds}`);
     
-    return res.status(response.status).json({
+    return res.status(200).json(data);
+  } catch (error) {
+    console.error('Polymarket Gamma API fetch error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    
+    return res.status(500).json({
       success: false,
       error: {
-        code: `POLYMARKET_GAMMA_${response.status}`,
-        message: `Polymarket Gamma API returned ${response.status}`,
-        details: errorText,
+        code: 'POLYMARKET_GAMMA_FETCH_ERROR',
+        message: 'Failed to fetch from Polymarket Gamma API',
+        details: errorMessage,
       },
       timestamp: new Date().toISOString(),
     });
   }
-
-  const data = await response.json();
-
-  // Cache the successful response
-  cache.set(cacheKey, {
-    data,
-    timestamp: Date.now(),
-  });
-
-  // Longer cache for static endpoints (tags, sports metadata)
-  const isStaticEndpoint = apiPath === 'tags' || apiPath === 'sports' || apiPath === 'sports/market-types';
-  const cacheSeconds = isStaticEndpoint ? 3600 : 60; // 1 hour for static, 1 minute for dynamic
-  const revalidateSeconds = isStaticEndpoint ? 7200 : 120;
-  res.setHeader('Cache-Control', `s-maxage=${cacheSeconds}, stale-while-revalidate=${revalidateSeconds}`);
-  
-  return res.status(200).json(data);
 }

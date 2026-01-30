@@ -152,7 +152,10 @@ function MainLayoutContent({ agentId }: { agentId: string }) {
       if (currentSessionId === invalidSessionId) {
         setCurrentSessionId(null);
         setRoomId(null);
-        hasCreatedSession.current = true; // Prevent auto-loading stale sessions
+        // Reset hasCreatedSession to allow auto-creation of a new session for the current matchup
+        hasCreatedSession.current = false;
+        // Also clear the active matchup session so useAutoMatchupSession can recreate
+        matchupContext.setActiveMatchupSession(null);
       }
     } finally {
       // Remove from cleanup set after a delay to allow for any pending operations

@@ -12,6 +12,7 @@ import { useGameStats, type SortField, type SortDirection } from '@/hooks/useGam
 import { useNBAInjuries } from '@/hooks/useNBAInjuries';
 import { PlayerStatsRow } from './PlayerStatsRow';
 import { ChevronDown, ChevronUp, TrendingUp, Activity, BarChart3 } from 'lucide-react';
+import weblogos from '@assets/weblogos1.svg';
 
 const STORAGE_KEY = 'live-team-stats-prefer-season';
 
@@ -501,18 +502,15 @@ export function LiveTeamStats() {
           )}
         </div>
         
-        {/* Debug info in development */}
-        {process.env.NODE_ENV === 'development' && (
-          <div className="text-[9px] text-muted-foreground/50 border-t border-border/30 pt-2 mt-2">
-            <div>Debug: preferSeason={String(preferSeasonStats)}, isSeason={String(isSeasonStats)}</div>
-            <div>Players: H={homePlayers.length} A={awayPlayers.length}, Loading={String(isLoading)}</div>
-            {gameStatsError && (
-              <div className="text-red-400">
-                Error: {(gameStatsError as Error | null)?.message || String(gameStatsError)}
-              </div>
-            )}
-          </div>
-        )}
+        {/* Logo */}
+        <div className="border-t border-border/30 pt-2 mt-2 flex items-center justify-center">
+          <img 
+            src={weblogos} 
+            alt="Logo" 
+            className="w-full h-auto max-w-full object-contain"
+            style={{ maxHeight: '60px' }}
+          />
+        </div>
       </div>
     </div>
   );

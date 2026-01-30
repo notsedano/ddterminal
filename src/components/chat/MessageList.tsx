@@ -8,6 +8,7 @@ import type { Message, PredictionThought } from '@/types';
 import { MarketButton } from '@/components/match-panel/MarketButton';
 import ddThumbnail from '@assets/dd-idl1.gif';
 import ddThinking from '@assets/dd thinking.gif';
+import terminalBanner from '@assets/_TERMINAL_banner.svg';
 
 export interface MessageListProps {
   messages: Message[];
@@ -69,6 +70,14 @@ export function MessageList({
   return (
     <div className="relative flex-1 h-full overflow-hidden" style={{ backgroundColor: '#1500FF' }}>
       <HackerBackground color="#1500FF" />
+      {/* Centered Logo Banner */}
+      <div className="absolute inset-0 flex items-center justify-center z-[5] pointer-events-none">
+        <img 
+          src={terminalBanner} 
+          alt="Terminal Banner" 
+          className="w-auto h-auto max-w-[80%] max-h-[60%] object-contain opacity-30"
+        />
+      </div>
       <div className={cn(
         "absolute bottom-0 left-0 z-20 pb-2 pl-2 sm:pb-3 sm:pl-3 md:pb-4 md:pl-4",
         "flex items-end gap-3",

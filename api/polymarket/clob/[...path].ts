@@ -80,41 +80,56 @@ export default async function handler(
   // Build Polymarket API URL
   const apiUrl = `${CLOB_API_BASE}/${fullPath}`;
 
-  const response = await fetch(apiUrl, {
-    headers: {
-      'Accept': 'application/json',
-    },
-  });
+  try {
+    const response = await fetch(apiUrl, {
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`Polymarket CLOB API error: ${response.status} - ${errorText}`);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Polymarket CLOB API error: ${response.status} - ${errorText}`);
+      
+      return res.status(response.status).json({
+        success: false,
+        error: {
+          code: `POLYMARKET_CLOB_${response.status}`,
+          message: `Polymarket CLOB API returned ${response.status}`,
+          details: errorText,
+        },
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const data = await response.json();
+
+    // Cache the successful response
+    if (!skipCache) {
+      cache.set(cacheKey, {
+        data,
+        timestamp: Date.now(),
+      });
+      // CDN cache for 15 seconds for price data
+      res.setHeader('Cache-Control', 's-maxage=15, stale-while-revalidate=30');
+    } else {
+      // No CDN cache for orderbooks - they change too rapidly
+      res.setHeader('Cache-Control', 'no-store');
+    }
+
+    return res.status(200).json(data);
+  } catch (error) {
+    console.error('Polymarket CLOB API fetch error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     
-    return res.status(response.status).json({
+    return res.status(500).json({
       success: false,
       error: {
-        code: `POLYMARKET_CLOB_${response.status}`,
-        message: `Polymarket CLOB API returned ${response.status}`,
-        details: errorText,
+        code: 'POLYMARKET_CLOB_FETCH_ERROR',
+        message: 'Failed to fetch from Polymarket CLOB API',
+        details: errorMessage,
       },
       timestamp: new Date().toISOString(),
     });
   }
-
-  const data = await response.json();
-
-  // Cache the successful response
-  if (!skipCache) {
-    cache.set(cacheKey, {
-      data,
-      timestamp: Date.now(),
-    });
-    // CDN cache for 15 seconds for price data
-    res.setHeader('Cache-Control', 's-maxage=15, stale-while-revalidate=30');
-  } else {
-    // No CDN cache for orderbooks - they change too rapidly
-    res.setHeader('Cache-Control', 'no-store');
-  }
-
-  return res.status(200).json(data);
 }

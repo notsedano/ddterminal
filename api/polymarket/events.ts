@@ -68,36 +68,51 @@ export default async function handler(
   // Build Polymarket API URL
   const apiUrl = `${GAMMA_API_BASE}/events?${queryParams.toString()}`;
 
-  const response = await fetch(apiUrl, {
-    headers: {
-      'Accept': 'application/json',
-    },
-  });
+  try {
+    const response = await fetch(apiUrl, {
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`Polymarket API error: ${response.status} - ${errorText}`);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Polymarket API error: ${response.status} - ${errorText}`);
+      
+      return res.status(response.status).json({
+        success: false,
+        error: {
+          code: `POLYMARKET_${response.status}`,
+          message: `Polymarket API returned ${response.status}`,
+          details: errorText,
+        },
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const data = await response.json();
+
+    // Cache the successful response
+    eventsCache.set(cacheKey, {
+      data,
+      timestamp: Date.now(),
+    });
+
+    // CDN cache for 1 minute, stale-while-revalidate for 2 minutes
+    res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=120');
+    return res.status(200).json(data);
+  } catch (error) {
+    console.error('Polymarket Events API fetch error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     
-    return res.status(response.status).json({
+    return res.status(500).json({
       success: false,
       error: {
-        code: `POLYMARKET_${response.status}`,
-        message: `Polymarket API returned ${response.status}`,
-        details: errorText,
+        code: 'POLYMARKET_EVENTS_FETCH_ERROR',
+        message: 'Failed to fetch from Polymarket Events API',
+        details: errorMessage,
       },
       timestamp: new Date().toISOString(),
     });
   }
-
-  const data = await response.json();
-
-  // Cache the successful response
-  eventsCache.set(cacheKey, {
-    data,
-    timestamp: Date.now(),
-  });
-
-  // CDN cache for 1 minute, stale-while-revalidate for 2 minutes
-  res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=120');
-  return res.status(200).json(data);
 }

@@ -14,6 +14,8 @@ interface UseAutoMatchupSessionOptions {
   enabled?: boolean;
   /** Callback when a session is created/selected */
   onSessionReady?: (sessionId: string) => void;
+  /** Force recreation of session (e.g., when current session is invalidated) */
+  forceRecreate?: boolean;
 }
 
 /**
@@ -22,7 +24,7 @@ interface UseAutoMatchupSessionOptions {
  * 2. User switches between matchups (always creates if no session exists for that matchup)
  */
 export function useAutoMatchupSession(options: UseAutoMatchupSessionOptions = {}) {
-  const { enabled = true, onSessionReady } = options;
+  const { enabled = true, onSessionReady, forceRecreate = false } = options;
   const { currentMatch } = useMatchPanel({ autoRefresh: true });
   const matchupContext = useMatchupSessionContext();
   const { data: allSessions = [] } = useSessions();
@@ -39,6 +41,18 @@ export function useAutoMatchupSession(options: UseAutoMatchupSessionOptions = {}
   const isCreatingRef = useRef(false);
   // Track if we've checked for existing sessions on initial load
   const [hasCheckedExistingSessions, setHasCheckedExistingSessions] = useState(false);
+  // Track forceRecreate state
+  const prevForceRecreateRef = useRef(forceRecreate);
+
+  // Reset tracking when forceRecreate becomes true
+  useEffect(() => {
+    if (forceRecreate && !prevForceRecreateRef.current) {
+      console.log('[useAutoMatchupSession] Force recreate triggered, resetting tracking');
+      lastProcessedGameIdRef.current = null;
+      hasCheckedInitialLoadRef.current = false;
+    }
+    prevForceRecreateRef.current = forceRecreate;
+  }, [forceRecreate]);
 
   // Check for existing sessions on initial load (only once)
   useEffect(() => {
@@ -68,13 +82,14 @@ export function useAutoMatchupSession(options: UseAutoMatchupSessionOptions = {}
     const game = currentMatch.game;
     const gameId = game.id;
 
-    // Skip if we already processed this game
-    if (lastProcessedGameIdRef.current === gameId) {
-      return;
-    }
-
     // Check if there's already a session for this game
     const existingSession = matchupContext.getSessionForGame(gameId);
+    
+    // Skip if we already processed this game AND the session still exists
+    // This allows recreation if the session was invalidated/deleted
+    if (lastProcessedGameIdRef.current === gameId && existingSession) {
+      return;
+    }
 
     if (existingSession) {
       // Session exists - switch to it if not already active

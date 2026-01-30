@@ -761,6 +761,9 @@ export function useChat({ sessionId, agentId, roomId: _roomId, onSessionInvalid,
     [sendMessageMutation, sessionId]
   );
 
+  // Track temp message IDs that were successfully added to messages state
+  const addedTempIdsRef = useRef<Set<string>>(new Set());
+  
   const sendMessageWithDisplayText = useCallback(
     (displayText: string, actualText: string, metadata?: { action?: 'predict'; context?: Record<string, unknown> }) => {
       if (!actualText.trim() || !sessionId) {
@@ -768,10 +771,13 @@ export function useChat({ sessionId, agentId, roomId: _roomId, onSessionInvalid,
       }
       
       const shouldShowDisplayMessage = displayText.trim().length > 0;
-      const tempUserMessageId = shouldShowDisplayMessage ? `user-${Date.now()}` : undefined;
+      const tempUserMessageId = shouldShowDisplayMessage ? `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}` : undefined;
       
       // Sanitize metadata before using it to prevent circular references
       const sanitizedMetadata = metadata ? sanitizeMetadata(metadata) : undefined;
+      
+      // Track whether we actually added the message
+      let messageWasAdded = false;
       
       if (shouldShowDisplayMessage && tempUserMessageId) {
         const displayMessage: Message = {
@@ -786,9 +792,22 @@ export function useChat({ sessionId, agentId, roomId: _roomId, onSessionInvalid,
             displayText: displayText,
             isPredictionMessage: true,
             actualText: actualText,
+            predictionTimestamp: Date.now(), // Unique timestamp for this prediction
           }),
         };
+        
+        // Add message to state - no duplicate check here since each prediction is unique
+        // The temp ID with random suffix ensures uniqueness
         setMessages((prev) => [...prev, sanitizePredictionMessage(displayMessage)]);
+        messageWasAdded = true;
+        addedTempIdsRef.current.add(tempUserMessageId);
+        
+        // Track temp ID immediately so polling doesn't fetch it
+        recentlySentMessageIdsRef.current.add(tempUserMessageId);
+        setTimeout(() => {
+          recentlySentMessageIdsRef.current.delete(tempUserMessageId);
+          addedTempIdsRef.current.delete(tempUserMessageId);
+        }, 30000); // Extended timeout for multi-part predictions
       }
       
       return new Promise<SendMessageResponse>((resolve, reject) => {
@@ -796,7 +815,7 @@ export function useChat({ sessionId, agentId, roomId: _roomId, onSessionInvalid,
           { text: actualText, metadata: sanitizedMetadata, skipAddingUserMessage: true },
           {
             onSuccess: (response) => {
-              if (shouldShowDisplayMessage && tempUserMessageId) {
+              if (shouldShowDisplayMessage && tempUserMessageId && messageWasAdded) {
                 const realMessageId = response.messageId;
                 
                 // Track this message ID so polling doesn't fetch it
@@ -804,12 +823,20 @@ export function useChat({ sessionId, agentId, roomId: _roomId, onSessionInvalid,
                   recentlySentMessageIdsRef.current.add(realMessageId);
                   setTimeout(() => {
                     recentlySentMessageIdsRef.current.delete(realMessageId);
-                  }, 10000);
+                  }, 30000);
                 }
                 
-                // Update temp ID to real ID immediately
-                setMessages((prev) => 
-                  prev.map(m => {
+                // Update temp ID to real ID
+                setMessages((prev) => {
+                  const existingIndex = prev.findIndex(m => m.id === tempUserMessageId);
+                  if (existingIndex === -1) {
+                    // Temp message not found - this can happen if state was cleared
+                    console.log('[useChat] Temp message not found, may have been cleared:', tempUserMessageId);
+                    return prev;
+                  }
+                  
+                  // Update temp ID to real ID
+                  return prev.map(m => {
                     if (m.id === tempUserMessageId) {
                       return {
                         ...m,
@@ -824,14 +851,20 @@ export function useChat({ sessionId, agentId, roomId: _roomId, onSessionInvalid,
                       };
                     }
                     return m;
-                  })
-                );
+                  });
+                });
+                
+                // Update tracking from temp to real ID
+                addedTempIdsRef.current.delete(tempUserMessageId);
               }
               resolve(response);
             },
             onError: (error) => {
-              if (shouldShowDisplayMessage && tempUserMessageId) {
+              if (shouldShowDisplayMessage && tempUserMessageId && messageWasAdded) {
                 setMessages((prev) => prev.filter(m => m.id !== tempUserMessageId));
+                // Remove from tracking
+                recentlySentMessageIdsRef.current.delete(tempUserMessageId);
+                addedTempIdsRef.current.delete(tempUserMessageId);
               }
               reject(error);
             },

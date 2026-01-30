@@ -201,9 +201,15 @@ export function mergeMessages(existing: Message[], newMessages: Message[]): Mess
 
   const existingIds = new Set(existing.map(m => m.id));
   
-  // Simple: filter out messages that already exist by ID
-  // Messages we just sent are already excluded in the polling function
-  const uniqueNew = newMessages.filter(m => !existingIds.has(m.id));
+  // Filter out messages that already exist by ID only
+  // The recentlySentMessageIdsRef in useChat handles polling duplicates
+  const uniqueNew = newMessages.filter(newMsg => {
+    // Skip if ID already exists
+    if (existingIds.has(newMsg.id)) {
+      return false;
+    }
+    return true;
+  });
   
   if (uniqueNew.length === 0) {
     // No new messages, just sanitize existing ones
